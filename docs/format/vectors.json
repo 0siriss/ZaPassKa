@@ -1,0 +1,117 @@
+{
+  "note": "Golden vectors for the ZaPassKa storage format. Regenerate with tools/make_vectors.py.",
+  "scrypt": {
+    "n": 131072,
+    "r": 8,
+    "p": 1,
+    "key_length": 32
+  },
+  "aead": {
+    "algorithm": "AES-256-GCM",
+    "nonce_length": 12,
+    "tag_length": 16,
+    "layout": "nonce || ciphertext || tag"
+  },
+  "key_derivation": [
+    {
+      "note": "scrypt for the ad unlock method",
+      "password": "Passw0rd! доменный",
+      "salt_hex": "0211057831a1640068fee0b8b4ce444e6935282fb8f99c7f4ce72ff17ca22d5c",
+      "key_hex": "ebf38b271de1b7d8a829d8561c155251560aa71b0b7132bbdbac8f997bfa43f7"
+    },
+    {
+      "note": "scrypt for the master unlock method",
+      "password": "correct horse battery staple",
+      "salt_hex": "500291506411779ff67201c2d547caf59ad054f7463a473f0f72db7f351f3d65",
+      "key_hex": "89ac02a657e46891b03bb3a1a2a5f0c861e709003a46a7e2c2e86a7583a68ce9"
+    }
+  ],
+  "key_wrapping": {
+    "note": "The data key sealed under the master-password key above.",
+    "kek_hex": "89ac02a657e46891b03bb3a1a2a5f0c861e709003a46a7e2c2e86a7583a68ce9",
+    "data_key_hex": "5297adf4de25d03f460563ee58e058a150dbcc17cad2d60e331719ce0e5589db",
+    "wrapped_hex": "f5d7b4204bafc76c6ceb85e935190b6e52856dc88a17a6f45bb0663924473e423256e432c99f385f3b97fe824e109d9939c523848f1eef8a2d46f2be"
+  },
+  "field_encryption": {
+    "note": "Fields sealed under the data key.",
+    "data_key_hex": "5297adf4de25d03f460563ee58e058a150dbcc17cad2d60e331719ce0e5589db",
+    "cases": [
+      {
+        "plaintext": "GitHub",
+        "nonce_hex": "9bb4cf7e600486282ae59cc6",
+        "blob_hex": "9bb4cf7e600486282ae59cc694e9021d0fec45409a3b9311226bec28f4a1361c954b"
+      },
+      {
+        "plaintext": "jdoe@corp.com",
+        "nonce_hex": "fdfd13396e9382fbd5dd9764",
+        "blob_hex": "fdfd13396e9382fbd5dd97649396c00045363a1e1a99280f88770658d31a63446ff46d320f65cff113"
+      },
+      {
+        "plaintext": "пароль-Ω-🔐",
+        "nonce_hex": "cd8dd7983d9e3a9fab591eb6",
+        "blob_hex": "cd8dd7983d9e3a9fab591eb6466ccda84c3cae0edd9078ad8e5d219024d21c395bbadda85040eedf94a151324fb40bde"
+      }
+    ]
+  },
+  "snapshot": {
+    "note": "A complete vault snapshot, as stored in Google Drive. Unwrap the data key with the master password, then read the entries; the third one is a tombstone and must not appear in the list.",
+    "master_password": "correct horse battery staple",
+    "data_key_hex": "5297adf4de25d03f460563ee58e058a150dbcc17cad2d60e331719ce0e5589db",
+    "digest": "74b1f5b90b2efa33aed77a40a6ad49226e8ab4e7be744f85485b60cd8e5c2860",
+    "document": {
+      "format": 1,
+      "vault_id": "0f1b3c6e-7a2d-4f10-9c5b-2d8e4a6f1b30",
+      "updated_at": "2026-02-03T11:30:00.000000Z",
+      "unlock_methods": [
+        {
+          "method": "master",
+          "identity": "",
+          "salt": "500291506411779ff67201c2d547caf59ad054f7463a473f0f72db7f351f3d65",
+          "wrapped_dek": "9de0IEuvx2xs64XpNRkLblKFbciKF6b0W7BmOSRHPkIyVuQyyZ84XzuX/oJOEJ2ZOcUjhI8e74otRvK+",
+          "updated_at": "2026-02-01T09:00:00.000000Z",
+          "deleted": 0
+        }
+      ],
+      "entries": [
+        {
+          "uuid": "3f6a0d18-0f4c-4a2e-8a71-1c9b5d2e7f01",
+          "service": "2ycaUavVLOthKaObCAEXvebH3diQmVJb2khqPXow8tUQuw==",
+          "login": "02jQyF6iB3NrqP2bm0XiNke32D1JoRLLktGClgJ1F49hSguEs0Vz+Jo=",
+          "password": "EjYumg4ogOK9RumkmPznNth8t8AIgZQQOKmXJOzG0ooDGTY=",
+          "updated_at": "2026-02-01T10:00:00.000000Z",
+          "deleted": 0
+        },
+        {
+          "uuid": "7c2e9b44-51d3-4b8a-9f60-8e1a3c7d5b22",
+          "service": "b6xSe3+05oC873EN+zcxYkRZ6eQ9e7GKPbShHKCASDoROwAYkYWL69b/",
+          "login": "LbelgFvP6Km3r1rkNhOCeRRDlO/aGsyUrOgOaE2kqefl",
+          "password": "CL4NoDZ4+mrLiltZpShemBA6akWxbjDL6/2eMRuXg2hcsmm6",
+          "updated_at": "2026-02-02T10:00:00.000000Z",
+          "deleted": 0
+        },
+        {
+          "uuid": "b18d5f90-2c47-4e6b-83a1-6f0c9d4e2a13",
+          "service": "",
+          "login": "",
+          "password": "",
+          "updated_at": "2026-02-03T10:00:00.000000Z",
+          "deleted": 1
+        }
+      ]
+    },
+    "expected_entries": [
+      {
+        "uuid": "3f6a0d18-0f4c-4a2e-8a71-1c9b5d2e7f01",
+        "service": "GitHub",
+        "login": "jdoe@corp.com",
+        "password": "gh-pass"
+      },
+      {
+        "uuid": "7c2e9b44-51d3-4b8a-9f60-8e1a3c7d5b22",
+        "service": "VPN офиса",
+        "login": "j.doe",
+        "password": "vpn-pass"
+      }
+    ]
+  }
+}
