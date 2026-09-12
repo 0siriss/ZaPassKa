@@ -295,11 +295,22 @@ class SecurityDialog(QDialog):
         card_lay.addWidget(self.detail_lbl)
         lay.addWidget(self.card)
 
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(8)
+
+        self.change_btn = QPushButton(tr("Change master password…"))
+        self.change_btn.setObjectName("rowBtn")
+        self.change_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.change_btn.clicked.connect(self._change_master_password)
+        buttons_row.addWidget(self.change_btn)
+
         self.switch_btn = QPushButton()
         self.switch_btn.setObjectName("rowBtn")
         self.switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.switch_btn.clicked.connect(self._switch)
-        lay.addWidget(self.switch_btn)
+        buttons_row.addWidget(self.switch_btn)
+        buttons_row.addStretch()
+        lay.addLayout(buttons_row)
 
         self.caution_lbl = QLabel()
         self.caution_lbl.setWordWrap(True)
@@ -326,6 +337,8 @@ class SecurityDialog(QDialog):
         row = crypto.current_method(self._session.vault_id)
         current = row["method"] if row else self._session.method
         since = tr(" · set {date}", date=row["updated_at"][:10]) if row else ""
+
+        self.change_btn.setVisible(current == METHOD_MASTER)
 
         if current == METHOD_MASTER:
             self.method_lbl.setText(tr("🔑  Master password"))
@@ -373,6 +386,31 @@ class SecurityDialog(QDialog):
         self._busy(tr("Rewrapping the vault key…"))
         self._run(crypto.switch_to_master, self._on_switched,
                   self._session, dlg.password())
+
+    def _change_master_password(self):
+        from login_window import MasterPasswordDialog
+
+        dlg = MasterPasswordDialog(
+            self, title=tr("Change Master Password"), ask_current=True,
+            intro=tr("The vault key is re-wrapped with the new password. Your "
+                     "entries are not re-encrypted and stay exactly as they are.")
+        )
+        while dlg.exec() == QDialog.DialogCode.Accepted:
+            self._busy(tr("Checking the current password…"))
+            QApplication.processEvents()
+
+            if not crypto.verify_master_password(self._session, dlg.current_password()):
+                self._busy(None)
+                dlg.show_error(tr("That is not your current master password."))
+                continue
+
+            self._busy(tr("Rewrapping the vault key…"))
+            QApplication.processEvents()
+            crypto.switch_to_master(self._session, dlg.password())
+
+            self._busy(None)
+            self._finish(tr("The master password has been changed."))
+            return
 
     def _switch_to_ad(self):
         store = settings.app_settings()
@@ -422,6 +460,7 @@ class SecurityDialog(QDialog):
 
     def _busy(self, msg: str | None):
         self.switch_btn.setEnabled(msg is None)
+        self.change_btn.setEnabled(msg is None)
         if msg:
             self._status(msg, ok=True)
 

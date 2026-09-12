@@ -270,6 +270,33 @@ class TestSecurityDialog(UiTestCase):
         self.assertIn("Master password", dialog.method_lbl.text())
         self.assertIn("Active Directory", dialog.switch_btn.text())
 
+    def test_only_a_master_vault_offers_a_password_change(self):
+        from vault_window import SecurityDialog
+
+        ad_session = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+        ad_dialog = self.track(SecurityDialog(ad_session))
+        self.assertFalse(ad_dialog.change_btn.isVisibleTo(ad_dialog))
+
+        master_session = crypto.create_vault(METHOD_MASTER, "", "master password")
+        master_dialog = self.track(SecurityDialog(master_session))
+        self.assertTrue(master_dialog.change_btn.isVisibleTo(master_dialog))
+
+    def test_the_change_dialog_asks_for_the_current_password(self):
+        from login_window import MasterPasswordDialog
+
+        plain = self.track(MasterPasswordDialog())
+        self.assertIsNone(plain.current_edit)
+
+        changing = self.track(MasterPasswordDialog(ask_current=True))
+        self.assertIsNotNone(changing.current_edit)
+
+        changing.pass_edit.setText("a long enough password")
+        changing.confirm_edit.setText("a long enough password")
+        changing._validate()
+        self.assertTrue(changing.error_lbl.isVisibleTo(changing),
+                        "an empty current password must be refused")
+
     def test_switching_updates_what_the_dialog_shows(self):
         from vault_window import SecurityDialog
 

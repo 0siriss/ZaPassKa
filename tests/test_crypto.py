@@ -91,6 +91,36 @@ class TestUnlockMethods(VaultTestCase):
         self.assertEqual(crypto.current_method(session.vault_id)["method"],
                          METHOD_MASTER)
 
+    def test_the_master_password_can_be_changed(self):
+        session = crypto.create_vault(METHOD_MASTER, "", "old master pw")
+        enc = crypto.encrypt_row(session.dek, "GitHub", "jdoe", "gh-pass")
+        database.insert_entry(session.vault_id, enc["service_enc"],
+                              enc["login_enc"], enc["password_enc"])
+
+        crypto.switch_to_master(session, "new master pw")
+
+        self.assertEqual(crypto.unlock_with_master("old master pw")[1],
+                         crypto.WRONG_SECRET)
+        opened, status = crypto.unlock_with_master("new master pw")
+        self.assertEqual(status, crypto.OK)
+        self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
+
+        entry = crypto.decrypt_row(opened.dek,
+                                   database.get_entries(opened.vault_id)[0])
+        self.assertEqual(entry["password"], "gh-pass")
+
+    def test_the_current_master_password_can_be_checked(self):
+        session = crypto.create_vault(METHOD_MASTER, "", "master pw")
+
+        self.assertTrue(crypto.verify_master_password(session, "master pw"))
+        self.assertFalse(crypto.verify_master_password(session, "wrong pw"))
+
+    def test_an_ad_vault_has_no_master_password_to_check(self):
+        session = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+
+        self.assertFalse(crypto.verify_master_password(session, "anything"))
+
     def test_switching_there_and_back_keeps_the_entries(self):
         """Leaving AD for a master password and returning loses nothing."""
         session = crypto.create_vault(

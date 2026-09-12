@@ -71,6 +71,19 @@ _RU = {
 
     # Dialogs
     "Set Master Password": "Задать мастер-пароль",
+    "Change Master Password": "Смена мастер-пароля",
+    "Change master password…": "Сменить мастер-пароль…",
+    "CURRENT MASTER PASSWORD": "ТЕКУЩИЙ МАСТЕР-ПАРОЛЬ",
+    "NEW MASTER PASSWORD": "НОВЫЙ МАСТЕР-ПАРОЛЬ",
+    "Enter your current master password.": "Введите текущий мастер-пароль.",
+    "That is not your current master password.":
+        "Это не текущий мастер-пароль.",
+    "Checking the current password…": "Проверяю текущий пароль…",
+    "The master password has been changed.": "Мастер-пароль изменён.",
+    "The vault key is re-wrapped with the new password. Your entries are not "
+    "re-encrypted and stay exactly as they are.":
+        "Ключ хранилища заворачивается в новый пароль. Записи не "
+        "перешифровываются и остаются ровно такими же.",
     "Create Vault": "Создать хранилище",
     "AD Password Changed": "Пароль домена изменился",
     "New Vault": "Новое хранилище",

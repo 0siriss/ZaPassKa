@@ -85,7 +85,7 @@ class PingWorker(QThread):
 class MasterPasswordDialog(QDialog):
     """Asks for a new master password twice."""
 
-    def __init__(self, parent=None, title=None, intro=""):
+    def __init__(self, parent=None, title=None, intro="", ask_current=False):
         super().__init__(parent)
         self.setWindowTitle(title or tr("Set Master Password"))
         self.setFixedWidth(440)
@@ -101,7 +101,16 @@ class MasterPasswordDialog(QDialog):
             info.setWordWrap(True)
             lay.addWidget(info)
 
-        lay.addWidget(QLabel(tr("MASTER PASSWORD")))
+        self.current_edit = None
+        if ask_current:
+            lay.addWidget(QLabel(tr("CURRENT MASTER PASSWORD")))
+            self.current_edit = QLineEdit()
+            self.current_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            self.current_edit.setPlaceholderText(theme.PASS_MASK)
+            lay.addWidget(self.current_edit)
+            lay.addWidget(QLabel(tr("NEW MASTER PASSWORD")))
+        else:
+            lay.addWidget(QLabel(tr("MASTER PASSWORD")))
         self.pass_edit = QLineEdit()
         self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.pass_edit.setPlaceholderText(theme.PASS_MASK)
@@ -134,7 +143,9 @@ class MasterPasswordDialog(QDialog):
 
     def _validate(self):
         password, confirm = self.pass_edit.text(), self.confirm_edit.text()
-        if len(password) < MIN_MASTER_LENGTH:
+        if self.current_edit is not None and not self.current_edit.text():
+            self._error(tr("Enter your current master password."))
+        elif len(password) < MIN_MASTER_LENGTH:
             self._error(tr("Use at least {count} characters.",
                            count=MIN_MASTER_LENGTH))
         elif password != confirm:
@@ -146,8 +157,13 @@ class MasterPasswordDialog(QDialog):
         self.error_lbl.setText(msg)
         self.error_lbl.show()
 
+    show_error = _error
+
     def password(self) -> str:
         return self.pass_edit.text()
+
+    def current_password(self) -> str:
+        return self.current_edit.text() if self.current_edit else ""
 
 
 class OldPasswordDialog(QDialog):

@@ -25,6 +25,7 @@ Consequences:
 Blob format everywhere: nonce(12) + ciphertext + tag(16).
 """
 
+import hmac
 import os
 from dataclasses import dataclass
 
@@ -236,6 +237,22 @@ def switch_to_master(session: VaultSession, master_password: str):
                   session.dek, exclusive=True)
     session.method   = METHOD_MASTER
     session.identity = ""
+
+
+def verify_master_password(session: VaultSession, password: str) -> bool:
+    """
+    True when `password` is the vault's current master password.
+
+    Asked before changing it, so that walking up to an unlocked session is not
+    enough to re-key someone else's vault.
+    """
+    row = database.get_unlock_method(session.vault_id, METHOD_MASTER, "")
+    if row is None:
+        return False
+
+    kek = derive_kek(password, bytes.fromhex(row["salt"]))
+    dek = unwrap_dek(kek, bytes(row["wrapped_dek"]))
+    return dek is not None and hmac.compare_digest(dek, session.dek)
 
 
 def switch_to_ad(session: VaultSession, username: str, ad_password: str):
