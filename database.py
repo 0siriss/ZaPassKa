@@ -378,49 +378,149 @@ def purge_tombstones(older_than: str):
 
 
 # ── Legacy schema (pre-vault) ─────────────────────────────────────
+#
+# Three shapes have existed and all of them may still be on disk:
+#   1. settings(key='kdf_salt_<user>') + passwords with nonce_s/nonce_l/nonce_p
+#   2. kdf_salts without a verifier column
+#   3. kdf_salts with a verifier, blobs carrying their own nonce
+# Everything here normalises them to one shape so the migration sees no
+# difference, because guessing wrong means a user loses their passwords.
 
-def legacy_kdf_record(username: str) -> sqlite3.Row | None:
+_LEGACY_SALT_PREFIX = "kdf_salt_"
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def legacy_kdf_record(username: str) -> dict | None:
+    """The user's salt and verifier from whichever old table holds them."""
     with get_connection() as conn:
-        if not _table_exists(conn, "kdf_salts"):
-            return None
-        return conn.execute(
-            "SELECT salt, verifier FROM kdf_salts WHERE username_hash=?",
-            (hash_identity(username),)
-        ).fetchone()
+        if _table_exists(conn, "kdf_salts"):
+            columns = _columns(conn, "kdf_salts")
+            verifier = "verifier" if "verifier" in columns else "NULL AS verifier"
+            row = conn.execute(
+                f"SELECT salt, {verifier} FROM kdf_salts WHERE username_hash=?",
+                (hash_identity(username),)
+            ).fetchone()
+            if row is not None:
+                return {"salt": row["salt"], "verifier": row["verifier"]}
+
+        # The first release kept salts in a settings table, keyed by name.
+        if _table_exists(conn, "settings"):
+            rows = conn.execute(
+                "SELECT key, value FROM settings WHERE key LIKE ?",
+                (_LEGACY_SALT_PREFIX + "%",)
+            ).fetchall()
+            for row in rows:
+                if row["key"][len(_LEGACY_SALT_PREFIX):].lower() == username.lower():
+                    return {"salt": row["value"], "verifier": None}
+
+        return None
 
 
-def legacy_passwords() -> list[sqlite3.Row]:
+def legacy_passwords() -> list[dict]:
+    """
+    Old rows with each field as one blob of nonce + ciphertext.
+
+    The first schema kept the nonce in its own column, so it is put back in
+    front of the ciphertext here. An unrecognised table yields nothing, which
+    stops the migration rather than letting it discard rows it cannot read.
+    """
     with get_connection() as conn:
         if not _table_exists(conn, "passwords"):
             return []
-        return conn.execute(
+
+        columns = _columns(conn, "passwords")
+        if not {"id", "service", "login", "password"} <= columns:
+            return []
+
+        split_nonce = {"nonce_s", "nonce_l", "nonce_p"} <= columns
+        if split_nonce:
+            rows = conn.execute(
+                "SELECT id, service, login, password, nonce_s, nonce_l, nonce_p "
+                "  FROM passwords ORDER BY id"
+            ).fetchall()
+            return [
+                {
+                    "id":       row["id"],
+                    "service":  bytes(row["nonce_s"]) + bytes(row["service"]),
+                    "login":    bytes(row["nonce_l"]) + bytes(row["login"]),
+                    "password": bytes(row["nonce_p"]) + bytes(row["password"]),
+                }
+                for row in rows
+            ]
+
+        rows = conn.execute(
             "SELECT id, service, login, password FROM passwords ORDER BY id"
         ).fetchall()
+        return [
+            {
+                "id":       row["id"],
+                "service":  bytes(row["service"]),
+                "login":    bytes(row["login"]),
+                "password": bytes(row["password"]),
+            }
+            for row in rows
+        ]
 
 
 def legacy_has_data() -> bool:
     with get_connection() as conn:
-        return _table_exists(conn, "kdf_salts") and conn.execute(
-            "SELECT 1 FROM kdf_salts LIMIT 1"
-        ).fetchone() is not None
+        for table, sql in (("kdf_salts", "SELECT 1 FROM kdf_salts LIMIT 1"),
+                           ("settings",
+                            "SELECT 1 FROM settings WHERE key LIKE 'kdf_salt_%' LIMIT 1")):
+            if _table_exists(conn, table) and conn.execute(sql).fetchone():
+                return True
+        return False
+
+
+def legacy_has_user(username: str) -> bool:
+    """Whether an old database holds a vault for this account."""
+    return legacy_kdf_record(username) is not None
 
 
 def legacy_drop_user(username: str, row_ids: list[int]):
     """Remove a migrated user's salt and the rows that moved to the new schema."""
     with get_connection() as conn:
         if _table_exists(conn, "kdf_salts"):
-            conn.execute(
-                "DELETE FROM kdf_salts WHERE username_hash=?",
-                (hash_identity(username),)
-            )
+            conn.execute("DELETE FROM kdf_salts WHERE username_hash=?",
+                         (hash_identity(username),))
+
+        if _table_exists(conn, "settings"):
+            rows = conn.execute(
+                "SELECT key FROM settings WHERE key LIKE ?",
+                (_LEGACY_SALT_PREFIX + "%",)
+            ).fetchall()
+            for row in rows:
+                if row["key"][len(_LEGACY_SALT_PREFIX):].lower() == username.lower():
+                    conn.execute("DELETE FROM settings WHERE key=?", (row["key"],))
+
         if _table_exists(conn, "passwords") and row_ids:
-            conn.executemany(
-                "DELETE FROM passwords WHERE id=?", [(i,) for i in row_ids]
-            )
-        # Once nothing is left behind, the old tables go away for good.
-        if _table_exists(conn, "kdf_salts") and _table_exists(conn, "passwords"):
-            salts_left = conn.execute("SELECT 1 FROM kdf_salts LIMIT 1").fetchone()
-            rows_left  = conn.execute("SELECT 1 FROM passwords LIMIT 1").fetchone()
-            if not salts_left and not rows_left:
-                conn.execute("DROP TABLE kdf_salts")
-                conn.execute("DROP TABLE passwords")
+            conn.executemany("DELETE FROM passwords WHERE id=?",
+                             [(i,) for i in row_ids])
+
+        _drop_empty_legacy_tables(conn)
+
+
+def _drop_empty_legacy_tables(conn: sqlite3.Connection):
+    """Retire the old tables once the last user has moved off them."""
+    salts_left = (
+        _table_exists(conn, "kdf_salts")
+        and conn.execute("SELECT 1 FROM kdf_salts LIMIT 1").fetchone() is not None
+    ) or (
+        _table_exists(conn, "settings")
+        and conn.execute(
+            "SELECT 1 FROM settings WHERE key LIKE 'kdf_salt_%' LIMIT 1"
+        ).fetchone() is not None
+    )
+    rows_left = (
+        _table_exists(conn, "passwords")
+        and conn.execute("SELECT 1 FROM passwords LIMIT 1").fetchone() is not None
+    )
+    if salts_left or rows_left:
+        return
+
+    for table in ("kdf_salts", "passwords"):
+        if _table_exists(conn, table):
+            conn.execute(f"DROP TABLE {table}")

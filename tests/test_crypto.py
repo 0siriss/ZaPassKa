@@ -257,6 +257,125 @@ class TestLegacyMigration(VaultTestCase):
         self.assertTrue(database.legacy_has_data())
 
 
+class TestOlderLegacyShapes(VaultTestCase):
+    """
+    Databases from every earlier release must still open. Getting this wrong
+    means a user upgrades and finds their passwords gone.
+    """
+
+    def _connect(self):
+        conn = sqlite3.connect(os.environ["ZAPASSKA_DB"])
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def test_the_first_schema_with_separate_nonce_columns(self):
+        """settings table for the salt, nonce kept in its own column."""
+        password = "ad-pw"
+        salt = os.urandom(32)
+        key = crypto.derive_kek(password, salt)
+
+        conn = self._connect()
+        conn.executescript("""
+            CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE passwords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service BLOB, login BLOB, password BLOB,
+                nonce_s BLOB, nonce_l BLOB, nonce_p BLOB,
+                created_at TEXT, updated_at TEXT);
+        """)
+        conn.execute("INSERT INTO settings VALUES ('kdf_salt_jdoe', ?)", (salt.hex(),))
+
+        blobs = [crypto.encrypt(key, text) for text in ("GitHub", "jdoe", "gh-pass")]
+        conn.execute(
+            "INSERT INTO passwords (service, login, password, nonce_s, nonce_l, "
+            "nonce_p, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (blobs[0][12:], blobs[1][12:], blobs[2][12:],
+             blobs[0][:12], blobs[1][:12], blobs[2][:12], "now", "now"))
+        conn.commit()
+        conn.close()
+
+        session, status = crypto.unlock_with_ad("jdoe", password)
+
+        self.assertEqual(status, crypto.OK)
+        entry = crypto.decrypt_row(session.dek,
+                                   database.get_entries(session.vault_id)[0])
+        self.assertEqual((entry["service"], entry["login"], entry["password"]),
+                         ("GitHub", "jdoe", "gh-pass"))
+
+    def test_a_kdf_salts_table_without_a_verifier_column(self):
+        password = "ad-pw"
+        salt = os.urandom(32)
+        key = crypto.derive_kek(password, salt)
+
+        conn = self._connect()
+        conn.executescript("""
+            CREATE TABLE kdf_salts (username_hash TEXT PRIMARY KEY, salt TEXT NOT NULL);
+            CREATE TABLE passwords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service BLOB NOT NULL, login BLOB NOT NULL, password BLOB NOT NULL);
+        """)
+        conn.execute("INSERT INTO kdf_salts VALUES (?,?)",
+                     (database.hash_identity("jdoe"), salt.hex()))
+        conn.execute("INSERT INTO passwords (service, login, password) VALUES (?,?,?)",
+                     (crypto.encrypt(key, "VPN"), crypto.encrypt(key, "jdoe"),
+                      crypto.encrypt(key, "vpn-pass")))
+        conn.commit()
+        conn.close()
+
+        session, status = crypto.unlock_with_ad("jdoe", password)
+
+        self.assertEqual(status, crypto.OK)
+        entry = crypto.decrypt_row(session.dek,
+                                   database.get_entries(session.vault_id)[0])
+        self.assertEqual(entry["password"], "vpn-pass")
+
+    def test_without_a_verifier_a_wrong_password_leaves_the_old_data_alone(self):
+        salt = os.urandom(32)
+        key = crypto.derive_kek("real-pw", salt)
+
+        conn = self._connect()
+        conn.executescript("""
+            CREATE TABLE kdf_salts (username_hash TEXT PRIMARY KEY, salt TEXT NOT NULL);
+            CREATE TABLE passwords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service BLOB NOT NULL, login BLOB NOT NULL, password BLOB NOT NULL);
+        """)
+        conn.execute("INSERT INTO kdf_salts VALUES (?,?)",
+                     (database.hash_identity("jdoe"), salt.hex()))
+        conn.execute("INSERT INTO passwords (service, login, password) VALUES (?,?,?)",
+                     (crypto.encrypt(key, "VPN"), crypto.encrypt(key, "jdoe"),
+                      crypto.encrypt(key, "vpn-pass")))
+        conn.commit()
+        conn.close()
+
+        self.assertIsNone(crypto.migrate_legacy_user("jdoe", "wrong-pw"))
+        self.assertTrue(database.legacy_has_user("jdoe"),
+                        "the old vault must survive a wrong password")
+
+        session, status = crypto.unlock_with_ad("jdoe", "real-pw")
+        self.assertEqual(status, crypto.OK)
+        entry = crypto.decrypt_row(session.dek,
+                                   database.get_entries(session.vault_id)[0])
+        self.assertEqual(entry["password"], "vpn-pass")
+
+    def test_an_unreadable_passwords_table_stops_the_migration(self):
+        """A shape we do not recognise must not be quietly thrown away."""
+        conn = self._connect()
+        conn.executescript("""
+            CREATE TABLE kdf_salts (username_hash TEXT PRIMARY KEY, salt TEXT NOT NULL);
+            CREATE TABLE passwords (id INTEGER PRIMARY KEY, blob BLOB);
+        """)
+        conn.execute("INSERT INTO kdf_salts VALUES (?,?)",
+                     (database.hash_identity("jdoe"), os.urandom(32).hex()))
+        conn.execute("INSERT INTO passwords VALUES (1, X'00')")
+        conn.commit()
+        conn.close()
+
+        self.assertEqual(database.legacy_passwords(), [])
+        self.assertIsNone(crypto.migrate_legacy_user("jdoe", "ad-pw"))
+        self.assertTrue(database.legacy_has_user("jdoe"))
+
+
 class TestFieldEncryption(VaultTestCase):
 
     def test_round_trip_with_unicode(self):

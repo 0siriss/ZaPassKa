@@ -301,11 +301,13 @@ def migrate_legacy_user(username: str, password: str) -> VaultSession | None:
                 decrypt(legacy_key, bytes(row["password"])),
             ))
             row_ids.append(row["id"])
-        except InvalidTag:
+        except (InvalidTag, UnicodeDecodeError, ValueError):
             continue      # belongs to another user of this machine
 
     if record["verifier"] is None and not moved:
-        # No verifier to check and nothing decrypted — can't confirm the key.
+        # The oldest databases stored no verifier. Without one, a key that
+        # decrypts nothing is indistinguishable from a wrong password, so
+        # refuse rather than retire a vault that might still be readable.
         return None
 
     session = create_vault(METHOD_AD, database.hash_identity(username),

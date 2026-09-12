@@ -62,6 +62,12 @@ _RU = {
         "Хранилище не открыто. Оно зашифровано прежним паролем домена, и "
         "развернуть ключ можно только им.",
     "Enter your previous password.": "Введите предыдущий пароль.",
+    "This computer holds a vault from an earlier version, and this password "
+    "does not open it. Sign in with the password that was in use when those "
+    "entries were saved.":
+        "На этом компьютере есть хранилище от прежней версии, и этот пароль "
+        "его не открывает. Войдите тем паролем, который действовал в момент "
+        "сохранения записей.",
     "That is not the previous password. Try again.":
         "Это не предыдущий пароль. Попробуйте ещё раз.",
     "No vault opened. Unlock your existing vault and add this account under "

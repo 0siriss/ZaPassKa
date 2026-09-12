@@ -758,6 +758,14 @@ class LoginWindow(QWidget):
         # NO_METHOD
         if self._mode == MODE_MASTER:
             self._show_error(tr("No vault is protected by this master password."))
+        elif database.legacy_has_user(self._username):
+            # An older database holds this account, but the password did not
+            # open it. Starting an empty vault here would bury it for good.
+            self._show_error(tr(
+                "This computer holds a vault from an earlier version, and this "
+                "password does not open it. Sign in with the password that was "
+                "in use when those entries were saved."
+            ))
         elif self._confirm_new_ad_vault():
             self._set_busy(tr("Creating vault…"))
             self._run(crypto.create_vault, self._on_vault_created,
