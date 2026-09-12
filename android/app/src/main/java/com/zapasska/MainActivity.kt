@@ -23,6 +23,7 @@ import com.zapasska.sync.GoogleAuth
 import com.zapasska.ui.ConfirmDialog
 import com.zapasska.ui.EntryDialog
 import com.zapasska.ui.LoginScreen
+import com.zapasska.ui.Strings
 import com.zapasska.ui.VaultScreen
 import com.zapasska.ui.ZaPassKaTheme
 import java.security.SecureRandom
@@ -49,6 +50,8 @@ class MainActivity : ComponentActivity() {
     private var query by mutableStateOf("")
     private var revealed by mutableStateOf<String?>(null)
     private var syncStatus by mutableStateOf("")
+    private var syncing by mutableStateOf(false)
+    private var hasVault by mutableStateOf(false)
 
     private var editing by mutableStateOf<Entry?>(null)
     private var showEditor by mutableStateOf(false)
@@ -61,6 +64,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         db = Database(applicationContext)
         vault = Vault(db)
+        Strings.load(applicationContext)
+        hasVault = vault.hasMasterVault()
+        creating = !hasVault
         syncStatus = driveStatus()
 
         setContent {
@@ -72,8 +78,8 @@ class MainActivity : ComponentActivity() {
                         onPasswordChange = { password = it; message = null },
                         confirm = confirm,
                         onConfirmChange = { confirm = it },
-                        creating = creating || !vault.hasMasterVault(),
-                        hasVault = vault.hasMasterVault(),
+                        creating = creating,
+                        canToggleCreate = hasVault || !creating,
                         busy = busy,
                         message = message,
                         driveConnected = GoogleAuth.isConnected(this),
@@ -81,14 +87,17 @@ class MainActivity : ComponentActivity() {
                         onCreate = ::createVault,
                         onToggleCreate = { creating = !creating; message = null },
                         onConnectDrive = ::connectDrive,
+                        onSwitchLanguage = ::switchLanguage,
                     )
                 } else {
                     VaultScreen(
                         entries = visibleEntries(),
+                        total = entries.size,
                         query = query,
                         onQueryChange = { query = it },
                         revealed = revealed,
                         syncStatus = syncStatus,
+                        syncing = syncing,
                         onToggleReveal = { uuid ->
                             revealed = if (revealed == uuid) null else uuid
                         },
@@ -98,11 +107,13 @@ class MainActivity : ComponentActivity() {
                         onAdd = { openEditor(null) },
                         onSync = ::syncNow,
                         onLock = ::lock,
+                        onSwitchLanguage = ::switchLanguage,
                     )
 
                     if (showEditor) {
                         EntryDialog(
-                            title = if (editing == null) "Новая запись" else "Изменить запись",
+                            title = Strings.tr(
+                                if (editing == null) "New entry" else "Edit entry"),
                             service = formService,
                             login = formLogin,
                             password = formPassword,
@@ -116,7 +127,8 @@ class MainActivity : ComponentActivity() {
                     }
                     deleting?.let { entry ->
                         ConfirmDialog(
-                            text = "Удалить запись «${entry.service}»? Это необратимо.",
+                            text = Strings.tr("Delete entry “%s”? This cannot be undone.",
+                                              entry.service),
                             onConfirm = {
                                 vault.deleteEntry(entry.uuid)
                                 deleting = null
@@ -137,7 +149,7 @@ class MainActivity : ComponentActivity() {
         val redirect: Uri = intent.data ?: return
         if (redirect.scheme != BuildConfig.OAUTH_REDIRECT_SCHEME) return
 
-        busy = "Подключаю Диск…"
+        busy = Strings.tr("Connecting Drive…")
         lifecycleScope.launch {
             val outcome = runCatching {
                 withContext(Dispatchers.IO) {
@@ -148,9 +160,12 @@ class MainActivity : ComponentActivity() {
             busy = null
             outcome
                 .onSuccess { (vaults, applied) ->
-                    syncStatus = if (vaults > 0)
-                        "☁ Скачано хранилищ: $vaults, записей: $applied"
-                    else "☁ Диск подключён"
+                    syncStatus =
+                        if (vaults > 0) Strings.tr("Downloaded %d vault(s), %d entries",
+                                                   vaults, applied)
+                        else Strings.tr("Drive connected")
+                    hasVault = vault.hasMasterVault()
+                    creating = !hasVault
                     message = null
                     reload()
                 }
@@ -162,37 +177,41 @@ class MainActivity : ComponentActivity() {
 
     private fun unlock() {
         if (password.isEmpty()) {
-            message = "Введите мастер-пароль."
+            message = Strings.tr("Enter your master password.")
             return
         }
-        busy = "Открываю…"
+        busy = Strings.tr("Opening…")
         lifecycleScope.launch {
             val unlocked = withContext(Dispatchers.IO) { vault.unlock(password) }
             busy = null
             when (unlocked.result) {
                 UnlockResult.OK -> open(unlocked.session!!)
-                UnlockResult.WRONG_SECRET -> message = "Неверный мастер-пароль."
-                UnlockResult.NO_VAULT ->
-                    message = "На этом телефоне нет хранилища. Создайте его или " +
-                        "подключите Google Диск, чтобы скачать."
+                UnlockResult.WRONG_SECRET -> message = Strings.tr("Wrong master password.")
+                UnlockResult.NO_VAULT -> {
+                    hasVault = false
+                    creating = true
+                    message = Strings.tr("No vault on this phone yet. Create one, or "
+                                         + "connect Google Drive to download it.")
+                }
             }
         }
     }
 
     private fun createVault() {
         if (password.length < MIN_MASTER_LENGTH) {
-            message = "Минимум $MIN_MASTER_LENGTH символов."
+            message = Strings.tr("At least %d characters.", MIN_MASTER_LENGTH)
             return
         }
         if (password != confirm) {
-            message = "Пароли не совпадают."
+            message = Strings.tr("The passwords do not match.")
             return
         }
-        busy = "Создаю хранилище…"
+        busy = Strings.tr("Creating the vault…")
         lifecycleScope.launch {
             val created = withContext(Dispatchers.IO) { vault.create(password) }
             busy = null
             creating = false
+            hasVault = true
             open(created)
         }
     }
@@ -257,7 +276,7 @@ class MainActivity : ComponentActivity() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText("password", entry.password)
         clipboard.setPrimaryClip(clip)
-        syncStatus = "Пароль скопирован"
+        syncStatus = Strings.tr("Password copied")
     }
 
     private fun generatePassword(): String {
@@ -275,16 +294,18 @@ class MainActivity : ComponentActivity() {
 
     // ── Google Drive ──────────────────────────────────────────────
 
-    private fun driveStatus(): String =
-        if (GoogleAuth.isConnected(this)) "☁ Диск подключён" else "☁ Диск не подключён"
+    private fun switchLanguage() = Strings.toggle(applicationContext)
+
+    private fun driveStatus(): String = Strings.tr(
+        if (GoogleAuth.isConnected(this)) "Drive connected" else "Drive not connected")
 
     private fun connectDrive() {
         if (!GoogleAuth.isConfigured()) {
-            message = "В эту сборку не встроен клиент Google."
+            message = Strings.tr("This build has no Google client inside.")
             return
         }
         if (GoogleAuth.isConnected(this)) {
-            busy = "Скачиваю хранилища…"
+            busy = Strings.tr("Downloading vaults…")
             lifecycleScope.launch {
                 val outcome = runCatching {
                     withContext(Dispatchers.IO) { Drive.pullAll(this@MainActivity, db) }
@@ -292,7 +313,10 @@ class MainActivity : ComponentActivity() {
                 busy = null
                 outcome
                     .onSuccess { (vaults, applied) ->
-                        syncStatus = "☁ Скачано хранилищ: $vaults, записей: $applied"
+                        syncStatus = Strings.tr("Downloaded %d vault(s), %d entries",
+                                                vaults, applied)
+                        hasVault = vault.hasMasterVault()
+                        creating = !hasVault
                         reload()
                     }
                     .onFailure { message = it.message }
@@ -307,27 +331,30 @@ class MainActivity : ComponentActivity() {
     private fun syncNow() {
         val current = session ?: return
         if (!Drive.isConnected(this)) {
-            syncStatus = "☁ Диск не подключён"
+            syncStatus = Strings.tr("Drive not connected")
             return
         }
-        syncStatus = "☁ Синхронизация…"
+        syncing = true
+        syncStatus = Strings.tr("Syncing…")
         lifecycleScope.launch {
             val outcome = runCatching {
                 withContext(Dispatchers.IO) { Drive.syncVault(this@MainActivity, db, current.vaultId) }
             }
+            syncing = false
             outcome
                 .onSuccess { result ->
                     syncStatus = when {
-                        result.created -> "☁ Хранилище выгружено на Диск"
-                        result.pulledEntries > 0 && result.pushed ->
-                            "☁ Получено записей: ${result.pulledEntries}, изменения выгружены"
-                        result.pulledEntries > 0 -> "☁ Получено записей: ${result.pulledEntries}"
-                        result.pushed -> "☁ Изменения выгружены"
-                        else -> "☁ Всё актуально"
+                        result.created -> Strings.tr("Backed up to Drive")
+                        result.pulledEntries > 0 ->
+                            Strings.tr("Pulled %d entries", result.pulledEntries)
+                        result.pushed -> Strings.tr("Changes pushed")
+                        else -> Strings.tr("Up to date")
                     }
                     if (result.pulledEntries > 0) reload()
                 }
-                .onFailure { syncStatus = "☁ Диск недоступен, работаю офлайн" }
+                .onFailure {
+                    syncStatus = Strings.tr("Drive unavailable, working offline")
+                }
         }
     }
 }
