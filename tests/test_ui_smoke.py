@@ -285,6 +285,24 @@ class TestSecurityDialog(UiTestCase):
         self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
 
 
+class TestAppIcon(UiTestCase):
+    """An ELF binary carries no icon, so Qt has to be told about it."""
+
+    def test_the_icon_loads_and_is_not_empty(self):
+        import resources
+
+        icon = resources.app_icon()
+
+        self.assertFalse(icon.isNull())
+        self.assertTrue(icon.availableSizes())
+
+    def test_both_icon_files_ship_with_the_code(self):
+        import resources
+
+        for name in resources.ICON_NAMES:
+            self.assertTrue(resources.resource_path(name).exists(), name)
+
+
 class TestEntryDialog(UiTestCase):
 
     def test_generated_passwords_cover_every_character_class(self):

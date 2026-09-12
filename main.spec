@@ -13,10 +13,12 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    # The icon travels inside the bundle: on Linux nothing else can supply one.
+    datas=[('icon.ico', '.'), ('icon.png', '.')],
     hiddenimports=[
         # Imported inside functions, so keep them explicit for the analyzer.
         'vault_window',
+        'settings',
         'cloud_sync',
         'gdrive',
         'sync',

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ZaPassKa
+GenericName=Password Manager
+Comment=AES-256-GCM password vault with AD or master password unlock
+Exec=/opt/zapasska/ZaPassKa
+Icon=zapasska
+Terminal=false
+Categories=Utility;Security;
+Keywords=password;vault;credentials;
+StartupWMClass=ZaPassKa
