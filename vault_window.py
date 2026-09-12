@@ -19,8 +19,10 @@ import cloud_sync
 import crypto
 import database
 import gdrive
+import i18n
 import settings
 import theme
+from i18n import tr
 from database import METHOD_MASTER
 
 CLIPBOARD_CLEAR_MS = 30_000
@@ -91,9 +93,9 @@ class TaskWorker(QThread):
 
 class EntryDialog(QDialog):
     def __init__(self, parent=None, service="", login="", password="",
-                 title="Add Entry"):
+                 title=None):
         super().__init__(parent)
-        self.setWindowTitle(title)
+        self.setWindowTitle(title or tr("Add Entry"))
         self.setFixedWidth(420)
         self.setStyleSheet(theme.DIALOG_STYLE)
 
@@ -114,17 +116,17 @@ class EntryDialog(QDialog):
             QPushButton:checked {{ color: {theme.ACCENT}; border-color: {theme.ACCENT}; }}
         """
 
-        lay.addWidget(QLabel("SERVICE / WEBSITE"))
+        lay.addWidget(QLabel(tr("SERVICE / WEBSITE")))
         self.service_edit = QLineEdit(service)
-        self.service_edit.setPlaceholderText("e.g. GitHub")
+        self.service_edit.setPlaceholderText(tr("e.g. GitHub"))
         lay.addWidget(self.service_edit)
 
-        lay.addWidget(QLabel("LOGIN / EMAIL"))
+        lay.addWidget(QLabel(tr("LOGIN / EMAIL")))
         self.login_edit = QLineEdit(login)
-        self.login_edit.setPlaceholderText("e.g. user@company.com")
+        self.login_edit.setPlaceholderText(tr("e.g. user@company.com"))
         lay.addWidget(self.login_edit)
 
-        lay.addWidget(QLabel("PASSWORD"))
+        lay.addWidget(QLabel(tr("PASSWORD")))
         pw_row = QHBoxLayout()
         pw_row.setSpacing(6)
 
@@ -136,7 +138,7 @@ class EntryDialog(QDialog):
         self.toggle_btn = QPushButton("👁")
         self.toggle_btn.setFixedSize(38, 38)
         self.toggle_btn.setCheckable(True)
-        self.toggle_btn.setToolTip("Show / hide password")
+        self.toggle_btn.setToolTip(tr("Show / hide password"))
         self.toggle_btn.setStyleSheet(btn_style)
         self.toggle_btn.toggled.connect(
             lambda shown: self.pass_edit.setEchoMode(
@@ -147,7 +149,7 @@ class EntryDialog(QDialog):
 
         gen_btn = QPushButton("↔")
         gen_btn.setFixedSize(38, 38)
-        gen_btn.setToolTip("Generate secure 16-char password")
+        gen_btn.setToolTip(tr("Generate secure 16-char password"))
         gen_btn.setStyleSheet(btn_style)
         gen_btn.clicked.connect(self._generate)
         pw_row.addWidget(gen_btn)
@@ -182,7 +184,7 @@ class AdUnlockDialog(QDialog):
 
     def __init__(self, parent=None, server="", username=""):
         super().__init__(parent)
-        self.setWindowTitle("Add Active Directory Unlock")
+        self.setWindowTitle(tr("Add Active Directory Unlock"))
         self.setFixedWidth(440)
         self.setStyleSheet(theme.DIALOG_STYLE)
 
@@ -190,24 +192,24 @@ class AdUnlockDialog(QDialog):
         lay.setSpacing(10)
         lay.setContentsMargins(28, 24, 28, 24)
 
-        info = QLabel(
+        info = QLabel(tr(
             "The domain password is checked against the DC first, then used "
             "to wrap this vault's key. Your entries stay as they are."
-        )
+        ))
         info.setObjectName("info")
         info.setWordWrap(True)
         lay.addWidget(info)
 
-        lay.addWidget(QLabel("AD SERVER (LDAP URL)"))
+        lay.addWidget(QLabel(tr("AD SERVER (LDAP URL)")))
         self.server_edit = QLineEdit(server)
         self.server_edit.setPlaceholderText("domain.com")
         lay.addWidget(self.server_edit)
 
-        lay.addWidget(QLabel("USERNAME"))
+        lay.addWidget(QLabel(tr("USERNAME")))
         self.user_edit = QLineEdit(username)
         lay.addWidget(self.user_edit)
 
-        lay.addWidget(QLabel("PASSWORD"))
+        lay.addWidget(QLabel(tr("PASSWORD")))
         self.pass_edit = QLineEdit()
         self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.pass_edit.setPlaceholderText(theme.PASS_MASK)
@@ -229,7 +231,7 @@ class AdUnlockDialog(QDialog):
         if all(self.values()):
             self.accept()
         else:
-            self.error_lbl.setText("Fill in every field.")
+            self.error_lbl.setText(tr("Fill in every field."))
             self.error_lbl.show()
 
     def values(self) -> tuple[str, str, str]:
@@ -258,7 +260,7 @@ class SecurityDialog(QDialog):
         self._worker  = None
         self.changed  = False
 
-        self.setWindowTitle("Vault Security")
+        self.setWindowTitle(tr("Vault Security"))
         self.setMinimumWidth(520)
         self.setStyleSheet(theme.DIALOG_STYLE)
 
@@ -266,10 +268,10 @@ class SecurityDialog(QDialog):
         lay.setSpacing(12)
         lay.setContentsMargins(28, 24, 28, 24)
 
-        intro = QLabel(
+        intro = QLabel(tr(
             "This vault has exactly one way in. Switching replaces it; your "
             "entries stay as they are."
-        )
+        ))
         intro.setObjectName("info")
         intro.setWordWrap(True)
         lay.addWidget(intro)
@@ -320,28 +322,29 @@ class SecurityDialog(QDialog):
     def _refresh(self):
         row = crypto.current_method(self._session.vault_id)
         current = row["method"] if row else self._session.method
-        since = f" · set {row['updated_at'][:10]}" if row else ""
+        since = tr(" · set {date}", date=row["updated_at"][:10]) if row else ""
 
         if current == METHOD_MASTER:
-            self.method_lbl.setText("🔑  Master password")
-            self.detail_lbl.setText("Opens the vault without the domain" + since)
-            self.switch_btn.setText("Switch to Active Directory…")
-            self.caution_lbl.setText(
+            self.method_lbl.setText(tr("🔑  Master password"))
+            self.detail_lbl.setText(tr("Opens the vault without the domain") + since)
+            self.switch_btn.setText(tr("Switch to Active Directory…"))
+            self.caution_lbl.setText(tr(
                 "After switching, the domain password is the only way in. "
                 "If it changes you will be asked for the previous one once; "
                 "forget it and the vault cannot be opened."
-            )
+            ))
             self.caution_lbl.setStyleSheet(
                 f"color: {theme.WARNING}; font-size: 11px; font-weight: 400;")
         else:
-            who = self._session.display_name or "domain account"
-            self.method_lbl.setText("🏢  Active Directory")
-            self.detail_lbl.setText(f"Opens with the password of {who}" + since)
-            self.switch_btn.setText("Switch to a master password…")
-            self.caution_lbl.setText(
+            who = self._session.display_name or tr("domain account")
+            self.method_lbl.setText(tr("🏢  Active Directory"))
+            self.detail_lbl.setText(
+                tr("Opens with the password of {who}", who=who) + since)
+            self.switch_btn.setText(tr("Switch to a master password…"))
+            self.caution_lbl.setText(tr(
                 "After switching, the domain is no longer involved. A "
                 "forgotten master password cannot be recovered."
-            )
+            ))
             self.caution_lbl.setStyleSheet(
                 f"color: {theme.TEXT_DIM}; font-size: 11px; font-weight: 400;")
 
@@ -357,14 +360,14 @@ class SecurityDialog(QDialog):
         from login_window import MasterPasswordDialog
 
         dlg = MasterPasswordDialog(
-            self, title="Switch to Master Password",
-            intro="From now on this password alone opens the vault, and the "
-                  "domain account stops working for it. The entries you see "
-                  "now stay exactly as they are."
+            self, title=tr("Switch to Master Password"),
+            intro=tr("From now on this password alone opens the vault, and the "
+                     "domain account stops working for it. The entries you see "
+                     "now stay exactly as they are.")
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self._busy("Rewrapping the vault key…")
+        self._busy(tr("Rewrapping the vault key…"))
         self._run(crypto.switch_to_master, self._on_switched,
                   self._session, dlg.password())
 
@@ -374,27 +377,28 @@ class SecurityDialog(QDialog):
                              username=self._session.display_name)
         while dlg.exec() == QDialog.DialogCode.Accepted:
             server, username, password = dlg.values()
-            self._busy("Checking the domain…")
+            self._busy(tr("Checking the domain…"))
             QApplication.processEvents()
 
             if not ad_auth.authenticate(server, username, password):
                 self._busy(None)
-                dlg.show_error("The domain rejected those credentials.")
+                dlg.show_error(tr("The domain rejected those credentials."))
                 continue
 
-            self._busy("Rewrapping the vault key…")
+            self._busy(tr("Rewrapping the vault key…"))
             QApplication.processEvents()
             crypto.switch_to_ad(self._session, username, password)
             store.setValue(settings.KEY_AD_SERVER, server)
             store.sync()
 
             self._busy(None)
-            self._finish(f"{username} is now the only way into this vault.")
+            self._finish(tr("{user} is now the only way into this vault.",
+                            user=username))
             return
 
     def _on_switched(self, _result):
         self._busy(None)
-        self._finish("The master password is now the only way into this vault.")
+        self._finish(tr("The master password is now the only way into this vault."))
 
     def _finish(self, message: str):
         self.changed = True
@@ -441,7 +445,7 @@ class VaultWindow(QWidget):
         self._sync_pending = False
         self._clip_timer = None
 
-        self.setWindowTitle("ZaPassKa (password manager)")
+        self.setWindowTitle(tr("ZaPassKa (password manager)"))
         self.setMinimumSize(940, 560)
         self.resize(1040, 640)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._on_top)
@@ -465,9 +469,10 @@ class VaultWindow(QWidget):
 
         col = QVBoxLayout()
         col.setSpacing(0)
-        header = QLabel("Password Vault")
+        header = QLabel(tr("Password Vault"))
         header.setObjectName("header")
-        user = QLabel(f"Unlocked with  {self._session.display_name}")
+        user = QLabel(tr("Unlocked with  {name}",
+                         name=tr(self._session.display_name)))
         user.setObjectName("userInfo")
         col.addWidget(header)
         col.addWidget(user)
@@ -475,28 +480,29 @@ class VaultWindow(QWidget):
         top.addStretch()
 
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("🔍  Search…")
+        self.search_edit.setPlaceholderText(tr("🔍  Search…"))
         self.search_edit.setFixedWidth(190)
         self.search_edit.textChanged.connect(self._filter)
         top.addWidget(self.search_edit)
 
-        add_btn = QPushButton("＋  Add Entry")
+        add_btn = QPushButton(tr("＋  Add Entry"))
         add_btn.setObjectName("addBtn")
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.clicked.connect(self._add_entry)
         top.addWidget(add_btn)
 
-        self.sync_btn = QPushButton("☁ Sync")
+        self.sync_btn = QPushButton(tr("☁ Sync"))
         self.sync_btn.setObjectName("toolBtn")
         self.sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sync_btn.setToolTip("Back up to Google Drive and pull other machines' changes")
+        self.sync_btn.setToolTip(
+            tr("Back up to Google Drive and pull other machines' changes"))
         self.sync_btn.clicked.connect(lambda: self._request_sync(manual=True))
         top.addWidget(self.sync_btn)
 
-        security_btn = QPushButton("🛡 Security")
+        security_btn = QPushButton(tr("🛡 Security"))
         security_btn.setObjectName("toolBtn")
         security_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        security_btn.setToolTip("Master password and Active Directory unlock")
+        security_btn.setToolTip(tr("Master password and Active Directory unlock"))
         security_btn.clicked.connect(self._open_security)
         top.addWidget(security_btn)
 
@@ -504,15 +510,23 @@ class VaultWindow(QWidget):
         self.pin_btn.setObjectName("pinBtn")
         self.pin_btn.setCheckable(True)
         self.pin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.pin_btn.setToolTip("Toggle always-on-top, remembered between sessions")
+        self.pin_btn.setToolTip(tr("Toggle always-on-top, remembered between sessions"))
         self.pin_btn.clicked.connect(self._toggle_on_top)
         self._update_pin_button()
         top.addWidget(self.pin_btn)
 
-        logout_btn = QPushButton("Sign out")
+        logout_btn = QPushButton(tr("Sign out"))
         logout_btn.setObjectName("logoutBtn")
         logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         logout_btn.clicked.connect(self._logout)
+
+        self.lang_btn = QPushButton(i18n.LANGUAGE_NAMES[i18n.other_language()])
+        self.lang_btn.setObjectName("toolBtn")
+        self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lang_btn.setToolTip(tr("Switch interface language"))
+        self.lang_btn.clicked.connect(self._switch_language)
+        top.addWidget(self.lang_btn)
+
         top.addWidget(logout_btn)
 
         root.addLayout(top)
@@ -524,7 +538,8 @@ class VaultWindow(QWidget):
 
         self.table = QTableWidget()
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Service", "Login", "Password", "Actions"])
+        self.table.setHorizontalHeaderLabels(
+            [tr("Service"), tr("Login"), tr("Password"), tr("Actions")])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setShowGrid(False)
@@ -561,9 +576,10 @@ class VaultWindow(QWidget):
                 failed += 1
         if failed:
             QMessageBox.warning(
-                self, "Decryption Warning",
-                f"{failed} entr(ies) could not be decrypted. They were written "
-                "with a different key — most likely a damaged sync."
+                self, tr("Decryption Warning"),
+                tr("{count} entr(ies) could not be decrypted. They were written "
+                   "with a different key — most likely a damaged sync.",
+                   count=failed)
             )
         self._filter(self.search_edit.text())
 
@@ -608,17 +624,20 @@ class VaultWindow(QWidget):
             return btn
 
         actions.addWidget(button(
-            "🙈 Hide" if shown else "👁 Show", "Toggle password visibility",
+            tr("🙈 Hide") if shown else tr("👁 Show"),
+            tr("Toggle password visibility"),
             lambda _, u=entry_uuid: self._toggle_pw(u)))
         actions.addWidget(button(
-            "📋 Copy", f"Copy password (cleared after {CLIPBOARD_CLEAR_MS // 1000}s)",
+            tr("📋 Copy"),
+            tr("Copy password (cleared after {seconds}s)",
+               seconds=CLIPBOARD_CLEAR_MS // 1000),
             lambda _, pw=row_data["password"]: self._copy_pw(pw)))
         actions.addWidget(button(
-            "✎ Edit", "Edit this entry",
+            tr("✎ Edit"), tr("Edit this entry"),
             lambda _, d=row_data: self._edit_entry(d)))
         actions.addStretch()
 
-        delete_btn = button("🗑", "Delete entry",
+        delete_btn = button("🗑", tr("Delete entry"),
                             lambda _, d=row_data: self._delete_entry(d), "dangerBtn")
         delete_btn.setFixedSize(32, 30)
         actions.addWidget(delete_btn)
@@ -628,9 +647,11 @@ class VaultWindow(QWidget):
     def _update_status(self):
         shown, total = self.table.rowCount(), len(self._rows)
         if shown == total:
-            self._status.setText(f"{total} entries · AES-256-GCM encrypted")
+            self._status.setText(
+                tr("{count} entries · AES-256-GCM encrypted", count=total))
         else:
-            self._status.setText(f"Showing {shown} of {total} entries")
+            self._status.setText(
+                tr("Showing {shown} of {total} entries", shown=shown, total=total))
 
     # ── Entry actions ─────────────────────────────────────────────
 
@@ -649,8 +670,8 @@ class VaultWindow(QWidget):
 
     def _copy_pw(self, password: str):
         QApplication.clipboard().setText(password)
-        self._status.setText(
-            f"✓ Copied — clipboard clears in {CLIPBOARD_CLEAR_MS // 1000}s")
+        self._status.setText(tr("✓ Copied — clipboard clears in {seconds}s",
+                                seconds=CLIPBOARD_CLEAR_MS // 1000))
         if self._clip_timer:
             self._clip_timer.stop()
         self._clip_timer = QTimer(self)
@@ -666,12 +687,13 @@ class VaultWindow(QWidget):
         self._update_status()
 
     def _add_entry(self):
-        dlg = EntryDialog(self, title="Add New Entry")
+        dlg = EntryDialog(self, title=tr("Add New Entry"))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         service, login, password = dlg.values()
         if not service or not login or not password:
-            QMessageBox.warning(self, "Validation", "All fields are required.")
+            QMessageBox.warning(self, tr("Validation"),
+                                tr("All fields are required."))
             return
         enc = crypto.encrypt_row(self._session.dek, service, login, password)
         database.insert_entry(self._session.vault_id, enc["service_enc"],
@@ -680,12 +702,13 @@ class VaultWindow(QWidget):
 
     def _edit_entry(self, row_data: dict):
         dlg = EntryDialog(self, service=row_data["service"], login=row_data["login"],
-                          password=row_data["password"], title="Edit Entry")
+                          password=row_data["password"], title=tr("Edit Entry"))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         service, login, password = dlg.values()
         if not service or not login or not password:
-            QMessageBox.warning(self, "Validation", "All fields are required.")
+            QMessageBox.warning(self, tr("Validation"),
+                                tr("All fields are required."))
             return
         enc = crypto.encrypt_row(self._session.dek, service, login, password)
         database.update_entry(row_data["uuid"], enc["service_enc"],
@@ -694,8 +717,9 @@ class VaultWindow(QWidget):
 
     def _delete_entry(self, row_data: dict):
         reply = QMessageBox.question(
-            self, "Delete Entry",
-            f"Delete entry for <b>{row_data['service']}</b>?<br>This cannot be undone.",
+            self, tr("Delete Entry"),
+            tr("Delete entry for <b>{service}</b>?<br>This cannot be undone.",
+               service=row_data["service"]),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -725,7 +749,7 @@ class VaultWindow(QWidget):
         so the vault keeps working offline.
         """
         if not cloud_sync.available():
-            self._sync_status.setText("☁ Drive: not connected")
+            self._sync_status.setText(tr("☁ Drive: not connected"))
             self.sync_btn.setEnabled(True)
             return
 
@@ -735,7 +759,7 @@ class VaultWindow(QWidget):
 
         self._sync_running = True
         self.sync_btn.setEnabled(False)
-        self._sync_status.setText("☁ Syncing…")
+        self._sync_status.setText(tr("☁ Syncing…"))
 
         self._sync_worker = SyncWorker(self._session.vault_id)
         self._sync_worker.done.connect(self._on_sync_done)
@@ -749,7 +773,7 @@ class VaultWindow(QWidget):
             self._load_rows()
 
     def _on_sync_failed(self, message: str):
-        self._sync_status.setText("☁ Drive unavailable — working offline")
+        self._sync_status.setText(tr("☁ Drive unavailable — working offline"))
         self._sync_status.setToolTip(message)
 
     def _on_sync_finished(self):
@@ -770,7 +794,16 @@ class VaultWindow(QWidget):
 
     def _update_pin_button(self):
         self.pin_btn.setChecked(self._on_top)
-        self.pin_btn.setText("📌 On Top" if self._on_top else "📌 Off")
+        self.pin_btn.setText(tr("📌 On Top") if self._on_top else tr("📌 Off"))
+
+    def _switch_language(self):
+        """Rebuild the window: every label was translated when it was created."""
+        i18n.set_language(i18n.other_language())
+        self._replacement = VaultWindow(self._session)
+        self._replacement.move(self.pos())
+        self._replacement.resize(self.size())
+        self._replacement.show()
+        self.close()
 
     def _logout(self):
         from login_window import LoginWindow

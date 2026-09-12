@@ -24,7 +24,9 @@ import ad_auth
 import crypto
 import database
 import gdrive
+import i18n
 import theme
+from i18n import tr
 from database import METHOD_AD, METHOD_MASTER
 from settings import KEY_AD_SERVER, KEY_AUTH_MODE, app_settings
 
@@ -32,6 +34,11 @@ MODE_AD     = "ad"
 MODE_MASTER = "master"
 
 MIN_MASTER_LENGTH = 8
+
+
+def _connected_text() -> str:
+    email = gdrive.account_email()
+    return tr("Connected as {email}.", email=email) if email else tr("Connected.")
 
 
 def pull_snapshots():
@@ -78,9 +85,9 @@ class PingWorker(QThread):
 class MasterPasswordDialog(QDialog):
     """Asks for a new master password twice."""
 
-    def __init__(self, parent=None, title="Set Master Password", intro=""):
+    def __init__(self, parent=None, title=None, intro=""):
         super().__init__(parent)
-        self.setWindowTitle(title)
+        self.setWindowTitle(title or tr("Set Master Password"))
         self.setFixedWidth(440)
         self.setStyleSheet(theme.DIALOG_STYLE)
 
@@ -94,22 +101,22 @@ class MasterPasswordDialog(QDialog):
             info.setWordWrap(True)
             lay.addWidget(info)
 
-        lay.addWidget(QLabel("MASTER PASSWORD"))
+        lay.addWidget(QLabel(tr("MASTER PASSWORD")))
         self.pass_edit = QLineEdit()
         self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.pass_edit.setPlaceholderText(theme.PASS_MASK)
         lay.addWidget(self.pass_edit)
 
-        lay.addWidget(QLabel("REPEAT PASSWORD"))
+        lay.addWidget(QLabel(tr("REPEAT PASSWORD")))
         self.confirm_edit = QLineEdit()
         self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_edit.setPlaceholderText(theme.PASS_MASK)
         lay.addWidget(self.confirm_edit)
 
-        warn = QLabel(
+        warn = QLabel(tr(
             "There is no way to recover a forgotten master password — it is "
             "never stored, only used to unwrap the vault key."
-        )
+        ))
         warn.setWordWrap(True)
         lay.addWidget(warn)
 
@@ -128,9 +135,10 @@ class MasterPasswordDialog(QDialog):
     def _validate(self):
         password, confirm = self.pass_edit.text(), self.confirm_edit.text()
         if len(password) < MIN_MASTER_LENGTH:
-            self._error(f"Use at least {MIN_MASTER_LENGTH} characters.")
+            self._error(tr("Use at least {count} characters.",
+                           count=MIN_MASTER_LENGTH))
         elif password != confirm:
-            self._error("The two passwords do not match.")
+            self._error(tr("The two passwords do not match."))
         else:
             self.accept()
 
@@ -150,7 +158,7 @@ class OldPasswordDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AD Password Changed")
+        self.setWindowTitle(tr("AD Password Changed"))
         self.setFixedWidth(440)
         self.setStyleSheet(theme.DIALOG_STYLE)
 
@@ -158,17 +166,17 @@ class OldPasswordDialog(QDialog):
         lay.setSpacing(10)
         lay.setContentsMargins(28, 24, 28, 24)
 
-        info = QLabel(
+        info = QLabel(tr(
             "Your Active Directory password has changed since this vault was "
             "last opened.\n\nEnter the previous password once — the vault key "
             "is simply re-wrapped with the new one. Your entries are not "
             "re-encrypted and cannot be lost in the process."
-        )
+        ))
         info.setObjectName("info")
         info.setWordWrap(True)
         lay.addWidget(info)
 
-        lay.addWidget(QLabel("PREVIOUS AD PASSWORD"))
+        lay.addWidget(QLabel(tr("PREVIOUS AD PASSWORD")))
         self.old_pass = QLineEdit()
         self.old_pass.setEchoMode(QLineEdit.EchoMode.Password)
         self.old_pass.setPlaceholderText(theme.PASS_MASK)
@@ -199,7 +207,7 @@ class GoogleClientDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Google OAuth Client")
+        self.setWindowTitle(tr("Google OAuth Client"))
         self.setFixedWidth(500)
         self.setStyleSheet(theme.DIALOG_STYLE)
 
@@ -207,23 +215,23 @@ class GoogleClientDialog(QDialog):
         lay.setSpacing(10)
         lay.setContentsMargins(28, 24, 28, 24)
 
-        info = QLabel(
+        info = QLabel(tr(
             "This build has no Google client baked in, so ZaPassKa needs one "
             "of yours.\n\nIn Google Cloud Console: enable the Drive API, then "
             "create an OAuth client of type “Desktop app” and paste its ID "
             "and secret here. They are stored locally and identify the "
             "application only — never your account."
-        )
+        ))
         info.setObjectName("info")
         info.setWordWrap(True)
         lay.addWidget(info)
 
-        lay.addWidget(QLabel("CLIENT ID"))
+        lay.addWidget(QLabel(tr("CLIENT ID")))
         self.id_edit = QLineEdit()
         self.id_edit.setPlaceholderText("1234567890-abc.apps.googleusercontent.com")
         lay.addWidget(self.id_edit)
 
-        lay.addWidget(QLabel("CLIENT SECRET"))
+        lay.addWidget(QLabel(tr("CLIENT SECRET")))
         self.secret_edit = QLineEdit()
         self.secret_edit.setPlaceholderText("GOCSPX-…")
         lay.addWidget(self.secret_edit)
@@ -247,7 +255,7 @@ class GoogleDriveDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Google Drive Backup")
+        self.setWindowTitle(tr("Google Drive Backup"))
         self.setFixedWidth(480)
         self.setStyleSheet(theme.DIALOG_STYLE)
         self._worker = None
@@ -256,11 +264,11 @@ class GoogleDriveDialog(QDialog):
         lay.setSpacing(12)
         lay.setContentsMargins(28, 24, 28, 24)
 
-        info = QLabel(
+        info = QLabel(tr(
             "Vaults are backed up to a private folder of your own Google "
             "Drive, visible to this app alone. Everything stored there is "
             "already encrypted — the key stays on your machines."
-        )
+        ))
         info.setObjectName("info")
         info.setWordWrap(True)
         lay.addWidget(info)
@@ -277,14 +285,14 @@ class GoogleDriveDialog(QDialog):
         self.connect_btn.clicked.connect(self._toggle_connection)
         row.addWidget(self.connect_btn)
 
-        self.pull_btn = QPushButton("Download vaults now")
+        self.pull_btn = QPushButton(tr("Download vaults now"))
         self.pull_btn.setObjectName("rowBtn")
         self.pull_btn.clicked.connect(self._pull)
         row.addWidget(self.pull_btn)
         row.addStretch()
         lay.addLayout(row)
 
-        self.client_btn = QPushButton("Configure OAuth client…")
+        self.client_btn = QPushButton(tr("Configure OAuth client…"))
         self.client_btn.setObjectName("rowBtn")
         self.client_btn.clicked.connect(self._configure_client)
         lay.addWidget(self.client_btn)
@@ -305,13 +313,11 @@ class GoogleDriveDialog(QDialog):
     def _refresh(self):
         connected = gdrive.is_connected()
         if connected:
-            email = gdrive.account_email()
-            self.status_lbl.setText(
-                f"Connected{' as ' + email if email else ''}.")
-            self.connect_btn.setText("Disconnect")
+            self.status_lbl.setText(_connected_text())
+            self.connect_btn.setText(tr("Disconnect"))
         else:
-            self.status_lbl.setText("Not connected — backups are disabled.")
-            self.connect_btn.setText("Connect Google Drive")
+            self.status_lbl.setText(tr("Not connected — backups are disabled."))
+            self.connect_btn.setText(tr("Connect Google Drive"))
         self.pull_btn.setEnabled(connected)
         self.client_btn.setVisible(not gdrive.has_client_config())
 
@@ -334,27 +340,27 @@ class GoogleDriveDialog(QDialog):
             if not gdrive.has_client_config():
                 return
 
-        self._busy("Waiting for the browser… finish signing in to Google.")
+        self._busy(tr("Waiting for the browser… finish signing in to Google."))
         self._run(gdrive.authorize, self._on_authorized)
 
-    def _on_authorized(self, email):
+    def _on_authorized(self, _email):
         self._busy(None)
-        self._show_result(f"Connected{' as ' + email if email else ''}.", ok=True)
+        self._show_result(_connected_text(), ok=True)
         self._pull()
 
     def _pull(self):
-        self._busy("Downloading vaults from Google Drive…")
+        self._busy(tr("Downloading vaults from Google Drive…"))
         self._run(pull_snapshots, self._on_pulled)
 
     def _on_pulled(self, counts):
         vaults, entries = counts
         self._busy(None)
         if vaults:
-            self._show_result(
-                f"{vaults} vault(s) downloaded, {entries} entries applied. "
-                "Sign in as usual.", ok=True)
+            self._show_result(tr(
+                "{vaults} vault(s) downloaded, {entries} entries applied. "
+                "Sign in as usual.", vaults=vaults, entries=entries), ok=True)
         else:
-            self._show_result("Nothing backed up on this account yet.", ok=True)
+            self._show_result(tr("Nothing backed up on this account yet."), ok=True)
 
     def _configure_client(self):
         dlg = GoogleClientDialog(self)
@@ -399,7 +405,7 @@ class LoginWindow(QWidget):
         self._repeat_timer  = None
         self._pending_password = ""
 
-        self.setWindowTitle("ZaPassKa — Login")
+        self.setWindowTitle(tr("ZaPassKa — Login"))
         self.setFixedSize(460, 600)
         self.setStyleSheet(theme.BASE_STYLE)
 
@@ -429,9 +435,9 @@ class LoginWindow(QWidget):
         icon.setStyleSheet("font-size: 30px;")
         col = QVBoxLayout()
         col.setSpacing(2)
-        title = QLabel("Password Vault")
+        title = QLabel(tr("Password Vault"))
         title.setObjectName("title")
-        subtitle = QLabel("AES-256-GCM encrypted password manager")
+        subtitle = QLabel(tr("AES-256-GCM encrypted password manager"))
         subtitle.setObjectName("subtitle")
         col.addWidget(title)
         col.addWidget(subtitle)
@@ -443,11 +449,11 @@ class LoginWindow(QWidget):
         lay.addSpacing(4)
 
         # Unlock mode switch
-        lay.addWidget(self._lbl("UNLOCK WITH"))
+        lay.addWidget(self._lbl(tr("UNLOCK WITH")))
         mode_row = QHBoxLayout()
         mode_row.setSpacing(8)
-        self.ad_mode_btn = QPushButton("🏢  Active Directory")
-        self.master_mode_btn = QPushButton("🔑  Master password")
+        self.ad_mode_btn = QPushButton(tr("🏢  Active Directory"))
+        self.master_mode_btn = QPushButton(tr("🔑  Master password"))
         for btn, mode in ((self.ad_mode_btn, MODE_AD),
                           (self.master_mode_btn, MODE_MASTER)):
             btn.setObjectName("modeBtn")
@@ -464,7 +470,7 @@ class LoginWindow(QWidget):
         ad_lay.setContentsMargins(0, 0, 0, 0)
         ad_lay.setSpacing(12)
 
-        ad_lay.addWidget(self._lbl("AD SERVER (LDAP URL)"))
+        ad_lay.addWidget(self._lbl(tr("AD SERVER (LDAP URL)")))
         srv_row = QHBoxLayout()
         srv_row.setSpacing(8)
         self.server_edit = QLineEdit()
@@ -476,11 +482,11 @@ class LoginWindow(QWidget):
         self.dc_dot.setFixedWidth(22)
         self.dc_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.dc_dot.setStyleSheet("font-size: 18px; color: #484f58;")
-        self.dc_dot.setToolTip("DC connection status")
+        self.dc_dot.setToolTip(tr("DC connection status"))
         srv_row.addWidget(self.dc_dot)
         ad_lay.addLayout(srv_row)
 
-        ad_lay.addWidget(self._lbl("USERNAME"))
+        ad_lay.addWidget(self._lbl(tr("USERNAME")))
         self.user_edit = QLineEdit()
         self.user_edit.setPlaceholderText(os.environ.get("USERNAME", "username"))
         self.user_edit.setText(os.environ.get("USERNAME", ""))
@@ -488,7 +494,7 @@ class LoginWindow(QWidget):
         lay.addWidget(self.ad_box)
 
         # Password
-        self.pass_label = self._lbl("PASSWORD")
+        self.pass_label = self._lbl(tr("PASSWORD"))
         lay.addWidget(self.pass_label)
         self.pass_edit = QLineEdit()
         self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -511,14 +517,14 @@ class LoginWindow(QWidget):
 
         lay.addSpacing(2)
 
-        self.login_btn = QPushButton("Sign In")
+        self.login_btn = QPushButton(tr("Sign In"))
         self.login_btn.setObjectName("loginBtn")
         self.login_btn.setFixedHeight(46)
         self.login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.login_btn.clicked.connect(self._do_login)
         lay.addWidget(self.login_btn)
 
-        self.create_btn = QPushButton("Create a vault with a master password")
+        self.create_btn = QPushButton(tr("Create a vault with a master password"))
         self.create_btn.setObjectName("linkBtn")
         self.create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.create_btn.clicked.connect(self._create_master_vault)
@@ -528,12 +534,22 @@ class LoginWindow(QWidget):
         lay.addStretch()
 
         drive_row = QHBoxLayout()
-        self.drive_btn = QPushButton("☁  Google Drive backup…")
+        self.drive_btn = QPushButton(tr("☁  Google Drive backup…"))
         self.drive_btn.setObjectName("linkBtn")
         self.drive_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.drive_btn.clicked.connect(self._open_drive_dialog)
         drive_row.addWidget(self.drive_btn)
         drive_row.addStretch()
+
+        self.lang_btn = QPushButton(i18n.LANGUAGE_NAMES[i18n.other_language()])
+        self.lang_btn.setObjectName("modeBtn")
+        self.lang_btn.setFixedSize(40, 24)
+        self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lang_btn.setToolTip(tr("Switch interface language"))
+        self.lang_btn.clicked.connect(self._switch_language)
+        drive_row.addWidget(self.lang_btn)
+        drive_row.addSpacing(8)
+
         self.drive_status = QLabel()
         self.drive_status.setObjectName("hint")
         drive_row.addWidget(self.drive_status)
@@ -556,23 +572,23 @@ class LoginWindow(QWidget):
         self.pass_edit.clear()
 
         if mode == MODE_AD:
-            self.pass_label.setText("PASSWORD")
-            self.login_btn.setText("Sign In")
+            self.pass_label.setText(tr("PASSWORD"))
+            self.login_btn.setText(tr("Sign In"))
             self.create_btn.hide()
             self._do_ping()
         else:
-            self.pass_label.setText("MASTER PASSWORD")
-            self.login_btn.setText("Unlock")
+            self.pass_label.setText(tr("MASTER PASSWORD"))
+            self.login_btn.setText(tr("Unlock"))
             has_master = database.has_method(METHOD_MASTER)
             self.create_btn.setVisible(not has_master)
             self.pass_edit.setEnabled(has_master)
             self.login_btn.setEnabled(has_master)
             if not has_master:
-                self._show_info(
+                self._show_info(tr(
                     "No master password on this machine yet. Sign in with "
                     "Active Directory and enable one under Security, or "
                     "create a new empty vault below."
-                )
+                ))
 
         app_settings().setValue(KEY_AUTH_MODE, mode)
 
@@ -623,7 +639,7 @@ class LoginWindow(QWidget):
         server = self.server_edit.text().strip()
         if not server:
             self.dc_dot.setStyleSheet("font-size: 18px; color: #484f58;")
-            self.dc_dot.setToolTip("No server configured")
+            self.dc_dot.setToolTip(tr("No server configured"))
             return
         if self._ping_worker and self._ping_worker.isRunning():
             return
@@ -634,32 +650,34 @@ class LoginWindow(QWidget):
     def _on_ping_result(self, ok: bool):
         color = theme.SUCCESS if ok else theme.DANGER
         self.dc_dot.setStyleSheet(f"font-size: 18px; color: {color};")
-        self.dc_dot.setToolTip(
-            "Domain controller reachable ✓" if ok else "Domain controller unreachable ✗")
+        self.dc_dot.setToolTip(tr("Domain controller reachable ✓") if ok
+                               else tr("Domain controller unreachable ✗"))
 
     # ── Google Drive ──────────────────────────────────────────────
 
     def _startup_drive_pull(self):
         """Pick up vaults backed up from another machine before the user signs in."""
         if not gdrive.is_connected():
-            self.drive_status.setText("Drive: off")
+            self.drive_status.setText(tr("Drive: off"))
             return
-        self.drive_status.setText("Drive: syncing…")
+        self.drive_status.setText(tr("Drive: syncing…"))
         self._drive_worker = CallWorker(pull_snapshots)
         self._drive_worker.done.connect(self._on_startup_pull)
         self._drive_worker.failed.connect(
-            lambda _msg: self.drive_status.setText("Drive: offline"))
+            lambda _msg: self.drive_status.setText(tr("Drive: offline")))
         self._drive_worker.start()
 
     def _on_startup_pull(self, counts):
         vaults, _entries = counts
-        self.drive_status.setText(f"Drive: {vaults} vault(s)" if vaults else "Drive: on")
+        self.drive_status.setText(
+            tr("Drive: {count} vault(s)", count=vaults) if vaults else tr("Drive: on"))
         if self._mode == MODE_MASTER and not self.login_btn.isEnabled():
             self._set_mode(MODE_MASTER)      # a pulled vault brought a master password
 
     def _open_drive_dialog(self):
         GoogleDriveDialog(self).exec()
-        self.drive_status.setText("Drive: on" if gdrive.is_connected() else "Drive: off")
+        self.drive_status.setText(
+            tr("Drive: on") if gdrive.is_connected() else tr("Drive: off"))
         self._set_mode(self._mode)
 
     # ── Sign in ───────────────────────────────────────────────────
@@ -667,7 +685,7 @@ class LoginWindow(QWidget):
     def _do_login(self):
         password = self.pass_edit.text()
         if not password:
-            self._show_error("Enter your password.")
+            self._show_error(tr("Enter your password."))
             return
 
         self.error_lbl.hide()
@@ -675,30 +693,31 @@ class LoginWindow(QWidget):
         self._pending_password = password
 
         if self._mode == MODE_MASTER:
-            self._set_busy("Unlocking…")
+            self._set_busy(tr("Unlocking…"))
             self._run(crypto.unlock_with_master, self._on_unlocked, password)
             return
 
         server   = self.server_edit.text().strip()
         username = self.user_edit.text().strip()
         if not server or not username:
-            self._show_error("Please fill in all fields.")
+            self._show_error(tr("Please fill in all fields."))
             return
 
         self._save_settings()
         self._username = username
-        self._set_busy("Authenticating…")
+        self._set_busy(tr("Authenticating…"))
         self._run(ad_auth.authenticate, self._on_ad_auth_done,
                   server, username, password)
 
     def _on_ad_auth_done(self, success: bool):
         if not success:
             self._set_busy(None)
-            self._show_error("Authentication failed. Check credentials or server address.")
+            self._show_error(
+                tr("Authentication failed. Check credentials or server address."))
             self.pass_edit.clear()
             return
 
-        self._set_busy("Opening vault…")
+        self._set_busy(tr("Opening vault…"))
         self._run(crypto.unlock_with_ad, self._on_unlocked,
                   self._username, self._pending_password)
 
@@ -712,7 +731,7 @@ class LoginWindow(QWidget):
 
         if status == crypto.WRONG_SECRET:
             if self._mode == MODE_MASTER:
-                self._show_error("Wrong master password.")
+                self._show_error(tr("Wrong master password."))
                 self.pass_edit.clear()
             else:
                 self._recover_changed_ad_password()
@@ -720,9 +739,9 @@ class LoginWindow(QWidget):
 
         # NO_METHOD
         if self._mode == MODE_MASTER:
-            self._show_error("No vault is protected by this master password.")
+            self._show_error(tr("No vault is protected by this master password."))
         elif self._confirm_new_ad_vault():
-            self._set_busy("Creating vault…")
+            self._set_busy(tr("Creating vault…"))
             self._run(crypto.create_vault, self._on_vault_created,
                       METHOD_AD, database.hash_identity(self._username),
                       self._pending_password, self._username)
@@ -737,19 +756,20 @@ class LoginWindow(QWidget):
             return True
 
         reply = QMessageBox.question(
-            self, "New Vault",
-            f"No vault on this machine is linked to <b>{self._username}</b>.<br><br>"
-            "Create a new, empty one?<br><br>"
-            "If your passwords are in an existing vault, cancel, unlock it the "
-            "way you usually do, and add this account under Security.",
+            self, tr("New Vault"),
+            tr("No vault on this machine is linked to <b>{user}</b>.<br><br>"
+               "Create a new, empty one?<br><br>"
+               "If your passwords are in an existing vault, cancel, unlock it "
+               "the way you usually do, and add this account under Security.",
+               user=self._username),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
         )
         if reply == QMessageBox.StandardButton.Yes:
             return True
 
-        self._show_info(
+        self._show_info(tr(
             "No vault opened. Unlock your existing vault and add this account "
-            "under Security to sign in with Active Directory next time.")
+            "under Security to sign in with Active Directory next time."))
         return False
 
     def _on_vault_created(self, session):
@@ -761,10 +781,10 @@ class LoginWindow(QWidget):
         while dlg.exec() == QDialog.DialogCode.Accepted:
             old_password = dlg.old_password()
             if not old_password:
-                dlg.show_error("Enter your previous password.")
+                dlg.show_error(tr("Enter your previous password."))
                 continue
 
-            self._set_busy("Re-wrapping vault key…")
+            self._set_busy(tr("Re-wrapping vault key…"))
             QApplication.processEvents()
             session = crypto.recover_with_old_ad_password(
                 self._username, old_password, self._pending_password)
@@ -773,24 +793,24 @@ class LoginWindow(QWidget):
             if session is not None:
                 self._open_vault(session)
                 return
-            dlg.show_error("That is not the previous password. Try again.")
+            dlg.show_error(tr("That is not the previous password. Try again."))
 
-        self._show_error(
+        self._show_error(tr(
             "Vault not opened. It is still encrypted with your previous AD "
             "password, and only that password can unwrap it."
-        )
+        ))
 
     def _create_master_vault(self):
         dlg = MasterPasswordDialog(
-            self, title="Create Vault",
-            intro="This creates a new, empty vault unlocked by a master "
-                  "password alone. To put an existing vault behind a master "
-                  "password instead, sign in with Active Directory and use "
-                  "Security in the vault window."
+            self, title=tr("Create Vault"),
+            intro=tr("This creates a new, empty vault unlocked by a master "
+                     "password alone. To put an existing vault behind a master "
+                     "password instead, sign in with Active Directory and use "
+                     "Security in the vault window.")
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self._set_busy("Creating vault…")
+        self._set_busy(tr("Creating vault…"))
         self._run(crypto.create_vault, self._on_vault_created,
                   METHOD_MASTER, "", dlg.password(), "master password")
 
@@ -822,7 +842,8 @@ class LoginWindow(QWidget):
             self.login_btn.setText(msg)
         else:
             self.login_btn.setEnabled(True)
-            self.login_btn.setText("Sign In" if self._mode == MODE_AD else "Unlock")
+            self.login_btn.setText(
+                tr("Sign In") if self._mode == MODE_AD else tr("Unlock"))
 
     def _show_error(self, msg: str):
         self.info_lbl.hide()
@@ -833,6 +854,16 @@ class LoginWindow(QWidget):
         self.error_lbl.hide()
         self.info_lbl.setText(msg)
         self.info_lbl.show()
+
+    def _switch_language(self):
+        """Rebuild the window: every label was translated when it was created."""
+        i18n.set_language(i18n.other_language())
+        if self._repeat_timer:
+            self._repeat_timer.stop()
+        self._replacement = LoginWindow()
+        self._replacement.move(self.pos())
+        self._replacement.show()
+        self.close()
 
     def closeEvent(self, event):
         if self._repeat_timer:

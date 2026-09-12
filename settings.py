@@ -13,10 +13,21 @@ APP_NAME = "ZaPassKa"
 KEY_AD_SERVER   = "ad_server"
 KEY_AUTH_MODE   = "auth_mode"
 KEY_STAY_ON_TOP = "stay_on_top"
+KEY_LANGUAGE    = "language"
 
 
 def app_settings() -> QSettings:
     return QSettings(ORG_NAME, APP_NAME)
+
+
+def language() -> str:
+    return app_settings().value(KEY_LANGUAGE, "en", type=str)
+
+
+def set_language(value: str):
+    store = app_settings()
+    store.setValue(KEY_LANGUAGE, value)
+    store.sync()
 
 
 def stay_on_top() -> bool:

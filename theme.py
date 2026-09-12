@@ -16,6 +16,22 @@ INPUT_BG = "#0d1117"
 
 PASS_MASK = "••••••••••••"
 
+# Tooltips are separate top-level windows, so the dark QWidget rule below
+# reaches them but the default text colour does not. Without this they render
+# as an unreadable black rectangle. Applied to the QApplication as well, since
+# a widget stylesheet does not cover its tooltips.
+TOOLTIP_STYLE = f"""
+QToolTip {{
+    background: #1c2128;
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    padding: 6px 9px;
+    font-size: 12px;
+    opacity: 240;
+}}
+"""
+
 _INPUTS = f"""
 QLineEdit {{
     background: {INPUT_BG};
@@ -51,7 +67,7 @@ QDialogButtonBox QPushButton[text="Cancel"] {{
 QDialogButtonBox QPushButton[text="Cancel"]:hover {{ background: rgba(255,255,255,0.05); }}
 """
 
-BASE_STYLE = f"""
+BASE_STYLE = TOOLTIP_STYLE + f"""
 QWidget {{
     background: {DARK_BG};
     font-family: 'Segoe UI', sans-serif;
@@ -134,7 +150,7 @@ QLabel#infoLbl {{
 QLabel#hint {{ color: {TEXT_DIM}; font-size: 10px; }}
 """
 
-DIALOG_STYLE = f"""
+DIALOG_STYLE = TOOLTIP_STYLE + f"""
 QDialog {{
     background: {PANEL_BG};
     color: {TEXT};
@@ -176,7 +192,7 @@ QFrame#card {{
 {_DIALOG_BUTTONS}
 """
 
-VAULT_STYLE = f"""
+VAULT_STYLE = TOOLTIP_STYLE + f"""
 QWidget {{
     background: {DARK_BG};
     color: {TEXT};

@@ -285,6 +285,81 @@ class TestSecurityDialog(UiTestCase):
         self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
 
 
+class TestLanguage(UiTestCase):
+    """The RU/EN button rebuilds the window in the other language."""
+
+    def setUp(self):
+        super().setUp()
+        import i18n
+        self._saved = i18n.current()
+
+    def tearDown(self):
+        import i18n
+        i18n.set_language(self._saved)
+        super().tearDown()
+
+    def test_the_login_window_switches_to_russian(self):
+        import i18n
+        from login_window import LoginWindow
+
+        i18n.set_language(i18n.EN)
+        window = self.track(LoginWindow())
+        self.assertEqual(window.login_btn.text(), "Sign In")
+        self.assertEqual(window.lang_btn.text(), "RU")
+
+        i18n.set_language(i18n.RU)
+        switched = self.track(LoginWindow())
+
+        self.assertEqual(switched.login_btn.text(), "Войти")
+        self.assertEqual(switched.lang_btn.text(), "EN")
+
+    def test_the_vault_window_switches_to_russian(self):
+        import i18n
+        from vault_window import VaultWindow
+
+        session = crypto.create_vault(METHOD_MASTER, "", "master password", "master")
+
+        i18n.set_language(i18n.EN)
+        window = self.track(VaultWindow(session))
+        self.assertEqual(window.table.horizontalHeaderItem(0).text(), "Service")
+
+        i18n.set_language(i18n.RU)
+        switched = self.track(VaultWindow(session))
+
+        self.assertEqual(switched.table.horizontalHeaderItem(0).text(), "Сервис")
+        self.assertEqual(switched.lang_btn.text(), "EN")
+
+    def test_the_choice_is_remembered(self):
+        import i18n
+        import settings
+
+        i18n.set_language(i18n.RU)
+        self.assertEqual(settings.language(), "ru")
+
+        i18n._current = i18n.EN          # as if the app had just started
+        i18n.init()
+        self.assertEqual(i18n.current(), i18n.RU)
+
+    def test_an_untranslated_string_falls_back_to_english(self):
+        import i18n
+
+        i18n.set_language(i18n.RU)
+
+        self.assertEqual(i18n.tr("a string nobody translated"),
+                         "a string nobody translated")
+
+    def test_every_russian_string_keeps_its_placeholders(self):
+        """A typo in a placeholder name would raise at runtime, not here."""
+        import i18n
+        import re
+
+        for source, translated in i18n._RU.items():
+            self.assertEqual(
+                set(re.findall(r"{(\w+)}", source)),
+                set(re.findall(r"{(\w+)}", translated)),
+                f"placeholders differ for {source!r}")
+
+
 class TestAppIcon(UiTestCase):
     """An ELF binary carries no icon, so Qt has to be told about it."""
 

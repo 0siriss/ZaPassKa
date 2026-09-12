@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import gdrive
 import sync
+from i18n import tr
 
 
 @dataclass
@@ -25,14 +26,15 @@ class SyncOutcome:
 
     def summary(self) -> str:
         if self.created:
-            return "Vault backed up to Google Drive"
+            return tr("Vault backed up to Google Drive")
         if self.pulled_entries and self.pushed:
-            return f"Synced · {self.pulled_entries} entries pulled, changes pushed"
+            return tr("Synced · {count} entries pulled, changes pushed",
+                      count=self.pulled_entries)
         if self.pulled_entries:
-            return f"Synced · {self.pulled_entries} entries pulled"
+            return tr("Synced · {count} entries pulled", count=self.pulled_entries)
         if self.pushed:
-            return "Synced · changes pushed"
-        return "Synced · already up to date"
+            return tr("Synced · changes pushed")
+        return tr("Synced · already up to date")
 
 
 def available() -> bool:
