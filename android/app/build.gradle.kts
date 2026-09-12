@@ -6,12 +6,16 @@ plugins {
 
 // Supplied by the build pipeline. Empty in a local build, and the app then
 // asks the user for their own OAuth client instead of failing.
-val googleClientId: String = System.getenv("ZAPASSKA_GOOGLE_CLIENT_ID") ?: ""
+// Trimmed everywhere: a secret pasted with a trailing newline is the usual
+// reason a correct password is rejected.
+fun env(name: String): String = (System.getenv(name) ?: "").trim()
+
+val googleClientId: String = env("ZAPASSKA_GOOGLE_CLIENT_ID")
 
 // Google ties an Android OAuth client to the signing certificate, so release
 // builds have to use one fixed keystore. Without it only a debug build is
 // possible, and its certificate differs on every machine.
-val keystorePath: String = System.getenv("ANDROID_KEYSTORE_PATH") ?: ""
+val keystorePath: String = env("ANDROID_KEYSTORE_PATH")
 
 android {
     namespace = "com.zapasska"
@@ -37,9 +41,9 @@ android {
         if (keystorePath.isNotEmpty()) {
             create("release") {
                 storeFile = file(keystorePath)
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
-                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                storePassword = env("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = env("ANDROID_KEY_ALIAS")
+                keyPassword = env("ANDROID_KEY_PASSWORD")
             }
         }
     }

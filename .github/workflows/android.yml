@@ -53,6 +53,43 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/zapasska.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/zapasska.jks" >> "$GITHUB_ENV"
 
+      # Gradle reports a bad password only after a two-minute build, and does
+      # not say which of the two is wrong. keytool answers in a second.
+      - name: Check the keystore opens
+        if: env.ANDROID_KEYSTORE_PATH != ''
+        run: |
+          store=$(printf '%s' "$ANDROID_KEYSTORE_PASSWORD")
+          alias=$(printf '%s' "$ANDROID_KEY_ALIAS")
+          key=$(printf '%s' "$ANDROID_KEY_PASSWORD")
+
+          if ! keytool -list -keystore "$ANDROID_KEYSTORE_PATH" \
+                       -storepass "$store" >/dev/null 2>&1; then
+            echo "::error::ANDROID_KEYSTORE_PASSWORD does not open the keystore." \
+                 "Check for a trailing newline or space in the secret, and that" \
+                 "ANDROID_KEYSTORE_BASE64 is the same keystore file."
+            exit 1
+          fi
+
+          if ! keytool -list -keystore "$ANDROID_KEYSTORE_PATH" -alias "$alias" \
+                       -storepass "$store" >/dev/null 2>&1; then
+            echo "::error::The keystore opens, but it holds no alias" \
+                 "'$alias'. Aliases present:"
+            keytool -list -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$store" \
+              | grep -i 'PrivateKeyEntry' || true
+            exit 1
+          fi
+
+          if ! keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -alias "$alias" \
+                       -storepass "$store" -keypass "$key" >/dev/null 2>&1; then
+            echo "::error::ANDROID_KEY_PASSWORD is wrong for alias '$alias'." \
+                 "It is often the same as the keystore password."
+            exit 1
+          fi
+
+          echo "The keystore opens and holds the alias. Signing can proceed."
+          keytool -list -v -keystore "$ANDROID_KEYSTORE_PATH" -alias "$alias" \
+                  -storepass "$store" | grep -E 'SHA1:|SHA256:'
+
       - name: Build APK
         working-directory: android
         run: |
