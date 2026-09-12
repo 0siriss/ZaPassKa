@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Android 15 draws applications edge to edge; the bars are transparent
+         and every screen pads itself with the window insets instead. -->
     <style name="Theme.ZaPassKa" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#0d1117</item>
-        <item name="android:navigationBarColor">#0d1117</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">#0d1117</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
 </resources>

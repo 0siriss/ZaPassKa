@@ -10,8 +10,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -69,7 +72,8 @@ fun VaultScreen(
             Row(
                 modifier = Modifier.fillMaxWidth()
                     .background(Palette.Panel)
-                    .padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
+                    .statusBarsPadding()
+                    .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -91,7 +95,7 @@ fun VaultScreen(
                 }
             }
 
-            Column(Modifier.padding(horizontal = 16.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp).imePadding()) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = query,
@@ -119,7 +123,7 @@ fun VaultScreen(
             }
 
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().navigationBarsPadding(),
                 contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -140,7 +144,9 @@ fun VaultScreen(
             onClick = onAdd,
             containerColor = Palette.Accent2,
             contentColor = androidx.compose.ui.graphics.Color.White,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+            modifier = Modifier.align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(20.dp),
         ) {
             Icon(Icons.Default.Add, contentDescription = tr("Add"))
         }
