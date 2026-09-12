@@ -24,6 +24,10 @@ jobs:
     env:
       # Empty for forks; the app then asks the user for their own client.
       ZAPASSKA_GOOGLE_CLIENT_ID: ${{ secrets.ANDROID_GOOGLE_CLIENT_ID }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,14 +45,34 @@ jobs:
         working-directory: android
         run: gradle --no-daemon :app:testDebugUnitTest
 
+      # Google matches the OAuth client against this certificate, so the
+      # signed build is the only one whose fingerprint stays put.
+      - name: Unpack the signing keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/zapasska.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/zapasska.jks" >> "$GITHUB_ENV"
+
       - name: Build APK
         working-directory: android
-        run: gradle --no-daemon :app:assembleDebug
+        run: |
+          if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
+            gradle --no-daemon :app:assembleRelease
+          else
+            echo "No signing keystore configured, building a debug APK."
+            gradle --no-daemon :app:assembleDebug
+          fi
+
+      - name: Report the certificate the APK was signed with
+        run: |
+          apk=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          echo "APK: $apk"
+          keytool -printcert -jarfile "$apk" | grep -E 'SHA1:|Owner:' || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: ZaPassKa-android
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/*/*.apk
           if-no-files-found: error
 
       - name: Publish test report on failure

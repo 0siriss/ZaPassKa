@@ -8,6 +8,11 @@ plugins {
 // asks the user for their own OAuth client instead of failing.
 val googleClientId: String = System.getenv("ZAPASSKA_GOOGLE_CLIENT_ID") ?: ""
 
+// Google ties an Android OAuth client to the signing certificate, so release
+// builds have to use one fixed keystore. Without it only a debug build is
+// possible, and its certificate differs on every machine.
+val keystorePath: String = System.getenv("ANDROID_KEYSTORE_PATH") ?: ""
+
 android {
     namespace = "com.zapasska"
     compileSdk = 35
@@ -28,8 +33,22 @@ android {
         buildConfigField("String", "OAUTH_REDIRECT_SCHEME", "\"$reversed\"")
     }
 
+    signingConfigs {
+        if (keystorePath.isNotEmpty()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (keystorePath.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),
                           "proguard-rules.pro")
