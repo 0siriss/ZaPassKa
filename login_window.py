@@ -587,8 +587,12 @@ class LoginWindow(QWidget):
         mode = settings.value(KEY_AUTH_MODE, MODE_AD)
         if mode not in (MODE_AD, MODE_MASTER):
             mode = MODE_AD
+        # Land on the mode this machine can actually use.
         if mode == MODE_MASTER and not database.has_method(METHOD_MASTER):
             mode = MODE_AD
+        elif (mode == MODE_AD and not database.has_method(METHOD_AD)
+              and database.has_method(METHOD_MASTER)):
+            mode = MODE_MASTER
         self._set_mode(mode)
 
     def _save_settings(self):
@@ -771,17 +775,10 @@ class LoginWindow(QWidget):
                 return
             dlg.show_error("That is not the previous password. Try again.")
 
-        if crypto.has_master_fallback(self._username):
-            self._show_info(
-                "Vault not opened. Switch to Master password above to get in, "
-                "then re-add this account under Security so your new domain "
-                "password works next time."
-            )
-        else:
-            self._show_error(
-                "Vault not opened. It is still encrypted with your previous AD "
-                "password and only that password can unwrap it."
-            )
+        self._show_error(
+            "Vault not opened. It is still encrypted with your previous AD "
+            "password, and only that password can unwrap it."
+        )
 
     def _create_master_vault(self):
         dlg = MasterPasswordDialog(

@@ -246,9 +246,10 @@ class AdUnlockDialog(QDialog):
 
 class SecurityDialog(QDialog):
     """
-    Lists the ways this vault can be opened and lets the user move between
-    them. Adding or removing a method only touches the wrapped copy of the
-    vault key — entries are never re-encrypted, so nothing can be lost here.
+    Shows the one way into this vault and switches it to the other one.
+
+    A switch rewraps the data key under the new secret and retires the old
+    wrapping. Entries are never re-encrypted, so the move cannot lose them.
     """
 
     def __init__(self, session, parent=None):
@@ -261,137 +262,113 @@ class SecurityDialog(QDialog):
         self.setMinimumWidth(520)
         self.setStyleSheet(theme.DIALOG_STYLE)
 
-        self._lay = QVBoxLayout(self)
-        self._lay.setSpacing(12)
-        self._lay.setContentsMargins(28, 24, 28, 24)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(12)
+        lay.setContentsMargins(28, 24, 28, 24)
 
-        info = QLabel(
-            "Every method below unwraps the same vault key. Keep at least one."
+        intro = QLabel(
+            "This vault has exactly one way in. Switching replaces it; your "
+            "entries stay as they are."
         )
-        info.setObjectName("info")
-        info.setWordWrap(True)
-        self._lay.addWidget(info)
+        intro.setObjectName("info")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
 
-        self._list_box = QVBoxLayout()
-        self._list_box.setSpacing(8)
-        self._lay.addLayout(self._list_box)
+        self.card = QFrame()
+        self.card.setObjectName("card")
+        card_lay = QVBoxLayout(self.card)
+        card_lay.setContentsMargins(14, 12, 14, 12)
+        card_lay.setSpacing(2)
+        self.method_lbl = QLabel()
+        self.method_lbl.setStyleSheet(
+            f"color: {theme.TEXT}; font-size: 13px; font-weight: 600;")
+        self.detail_lbl = QLabel()
+        self.detail_lbl.setStyleSheet(
+            f"color: {theme.TEXT_DIM}; font-size: 11px; font-weight: 400;")
+        self.detail_lbl.setWordWrap(True)
+        card_lay.addWidget(self.method_lbl)
+        card_lay.addWidget(self.detail_lbl)
+        lay.addWidget(self.card)
+
+        self.switch_btn = QPushButton()
+        self.switch_btn.setObjectName("rowBtn")
+        self.switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.switch_btn.clicked.connect(self._switch)
+        lay.addWidget(self.switch_btn)
+
+        self.caution_lbl = QLabel()
+        self.caution_lbl.setWordWrap(True)
+        lay.addWidget(self.caution_lbl)
 
         self.status_lbl = QLabel()
-        self.status_lbl.setObjectName("info")
         self.status_lbl.setWordWrap(True)
         self.status_lbl.hide()
-        self._lay.addWidget(self.status_lbl)
-
-        add_row = QHBoxLayout()
-        add_row.setSpacing(8)
-        self.master_btn = QPushButton()
-        self.master_btn.setObjectName("rowBtn")
-        self.master_btn.clicked.connect(self._set_master_password)
-        add_row.addWidget(self.master_btn)
-
-        self.ad_btn = QPushButton("Add Active Directory unlock…")
-        self.ad_btn.setObjectName("rowBtn")
-        self.ad_btn.clicked.connect(self._add_ad_unlock)
-        add_row.addWidget(self.ad_btn)
-        add_row.addStretch()
-        self._lay.addLayout(add_row)
+        lay.addWidget(self.status_lbl)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.accept)
-        self._lay.addWidget(buttons)
+        lay.addWidget(buttons)
 
         self._refresh()
 
-    # ── List ──────────────────────────────────────────────────────
+    # ── State ─────────────────────────────────────────────────────
+
+    def _current(self) -> str:
+        row = crypto.current_method(self._session.vault_id)
+        return row["method"] if row else self._session.method
 
     def _refresh(self):
-        while self._list_box.count():
-            item = self._list_box.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        row = crypto.current_method(self._session.vault_id)
+        current = row["method"] if row else self._session.method
+        since = f" · set {row['updated_at'][:10]}" if row else ""
 
-        methods = database.list_unlock_methods(self._session.vault_id)
-        for row in methods:
-            self._list_box.addWidget(self._method_card(row, len(methods)))
-
-        has_master = any(r["method"] == METHOD_MASTER for r in methods)
-        self.master_btn.setText(
-            "Change master password…" if has_master else "Set a master password…")
-
-    def _method_card(self, row, total: int) -> QFrame:
-        card = QFrame()
-        card.setObjectName("card")
-        lay = QHBoxLayout(card)
-        lay.setContentsMargins(14, 10, 14, 10)
-
-        if row["method"] == METHOD_MASTER:
-            title, detail = "🔑  Master password", "Opens the vault without the domain"
+        if current == METHOD_MASTER:
+            self.method_lbl.setText("🔑  Master password")
+            self.detail_lbl.setText("Opens the vault without the domain" + since)
+            self.switch_btn.setText("Switch to Active Directory…")
+            self.caution_lbl.setText(
+                "After switching, the domain password is the only way in. "
+                "If it changes you will be asked for the previous one once; "
+                "forget it and the vault cannot be opened."
+            )
+            self.caution_lbl.setStyleSheet(
+                f"color: {theme.WARNING}; font-size: 11px; font-weight: 400;")
         else:
-            title  = "🏢  Active Directory"
-            detail = f"identity {row['identity'][:12]}…"
+            who = self._session.display_name or "domain account"
+            self.method_lbl.setText("🏢  Active Directory")
+            self.detail_lbl.setText(f"Opens with the password of {who}" + since)
+            self.switch_btn.setText("Switch to a master password…")
+            self.caution_lbl.setText(
+                "After switching, the domain is no longer involved. A "
+                "forgotten master password cannot be recovered."
+            )
+            self.caution_lbl.setStyleSheet(
+                f"color: {theme.TEXT_DIM}; font-size: 11px; font-weight: 400;")
 
-        col = QVBoxLayout()
-        col.setSpacing(1)
-        name = QLabel(title)
-        name.setStyleSheet(f"color: {theme.TEXT}; font-size: 13px; font-weight: 600;")
-        sub = QLabel(f"{detail} · added {row['updated_at'][:10]}")
-        sub.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 11px; font-weight: 400;")
-        col.addWidget(name)
-        col.addWidget(sub)
-        lay.addLayout(col)
-        lay.addStretch()
+    # ── Switching ─────────────────────────────────────────────────
 
-        remove = QPushButton("Remove")
-        remove.setObjectName("rowDangerBtn")
-        remove.setCursor(Qt.CursorShape.PointingHandCursor)
-        remove.setEnabled(total > 1)
-        if total <= 1:
-            remove.setToolTip("The only way into this vault cannot be removed")
-        remove.clicked.connect(
-            lambda _, m=row["method"], i=row["identity"]: self._remove(m, i))
-        lay.addWidget(remove)
-        return card
-
-    # ── Actions ───────────────────────────────────────────────────
-
-    def _remove(self, method: str, identity: str):
-        label = "master password" if method == METHOD_MASTER else "Active Directory"
-        reply = QMessageBox.question(
-            self, "Remove Unlock Method",
-            f"Stop using the {label} to open this vault?<br>"
-            "The entries stay untouched.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        if crypto.remove_method(self._session, method, identity):
-            self.changed = True
-            self._status(f"{label.capitalize()} removed.", ok=True)
+    def _switch(self):
+        if self._current() == METHOD_MASTER:
+            self._switch_to_ad()
         else:
-            self._status("That is the only way into this vault.", ok=False)
-        self._refresh()
+            self._switch_to_master()
 
-    def _set_master_password(self):
+    def _switch_to_master(self):
         from login_window import MasterPasswordDialog
+
         dlg = MasterPasswordDialog(
-            self,
-            intro="The master password opens this vault on its own, with the "
-                  "same entries you see now."
+            self, title="Switch to Master Password",
+            intro="From now on this password alone opens the vault, and the "
+                  "domain account stops working for it. The entries you see "
+                  "now stay exactly as they are."
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self._busy("Wrapping the vault key…")
-        self._run(crypto.set_master_password, self._on_master_set,
+        self._busy("Rewrapping the vault key…")
+        self._run(crypto.switch_to_master, self._on_switched,
                   self._session, dlg.password())
 
-    def _on_master_set(self, _result):
-        self._busy(None)
-        self.changed = True
-        self._status("Master password is now active for this vault.", ok=True)
-        self._refresh()
-
-    def _add_ad_unlock(self):
+    def _switch_to_ad(self):
         store = settings.app_settings()
         dlg = AdUnlockDialog(self, server=store.value(settings.KEY_AD_SERVER, ""),
                              username=self._session.display_name)
@@ -405,17 +382,24 @@ class SecurityDialog(QDialog):
                 dlg.show_error("The domain rejected those credentials.")
                 continue
 
-            self._busy("Wrapping the vault key…")
+            self._busy("Rewrapping the vault key…")
             QApplication.processEvents()
-            crypto.set_ad_unlock(self._session, username, password)
+            crypto.switch_to_ad(self._session, username, password)
             store.setValue(settings.KEY_AD_SERVER, server)
             store.sync()
 
             self._busy(None)
-            self.changed = True
-            self._status(f"{username} can now open this vault.", ok=True)
-            self._refresh()
+            self._finish(f"{username} is now the only way into this vault.")
             return
+
+    def _on_switched(self, _result):
+        self._busy(None)
+        self._finish("The master password is now the only way into this vault.")
+
+    def _finish(self, message: str):
+        self.changed = True
+        self._status(message, ok=True)
+        self._refresh()
 
     # ── Helpers ───────────────────────────────────────────────────
 
@@ -430,8 +414,7 @@ class SecurityDialog(QDialog):
         self._status(message, ok=False)
 
     def _busy(self, msg: str | None):
-        for btn in (self.master_btn, self.ad_btn):
-            btn.setEnabled(msg is None)
+        self.switch_btn.setEnabled(msg is None)
         if msg:
             self._status(msg, ok=True)
 

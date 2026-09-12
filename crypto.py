@@ -129,10 +129,18 @@ def create_vault(method: str, identity: str, secret: str,
 
 
 def _store_method(vault_id: str, method: str, identity: str,
-                  secret: str, dek: bytes):
-    salt = os.urandom(_SALT_LEN)
-    kek  = derive_kek(secret, salt)
-    database.save_unlock_method(vault_id, method, identity, salt.hex(), wrap_dek(kek, dek))
+                  secret: str, dek: bytes, exclusive: bool = False):
+    """
+    Wrap the data key under a key derived from `secret`.
+    With exclusive=True this becomes the vault's only way in.
+    """
+    salt    = os.urandom(_SALT_LEN)
+    kek     = derive_kek(secret, salt)
+    wrapped = wrap_dek(kek, dek)
+    if exclusive:
+        database.replace_unlock_method(vault_id, method, identity, salt.hex(), wrapped)
+    else:
+        database.save_unlock_method(vault_id, method, identity, salt.hex(), wrapped)
 
 
 def _try_unlock(rows, secret: str, method: str) -> VaultSession | None:
@@ -198,19 +206,6 @@ def rewrap_method(vault_id: str, method: str, identity: str,
     return True
 
 
-def has_master_fallback(username: str) -> bool:
-    """
-    True when a vault this AD account unlocks also has a master password.
-    Used to tell a user who forgot their previous domain password whether
-    there is still a way in.
-    """
-    return any(
-        database.get_unlock_method(row["vault_id"], METHOD_MASTER, "") is not None
-        for row in database.find_unlock_methods(METHOD_AD,
-                                                database.hash_identity(username))
-    )
-
-
 def recover_with_old_ad_password(username: str, old_password: str,
                                  new_password: str) -> VaultSession | None:
     """
@@ -229,28 +224,34 @@ def recover_with_old_ad_password(username: str, old_password: str,
     return session
 
 
-# ── Managing unlock methods of an open vault ──────────────────────
+# ── Switching the unlock method of an open vault ──────────────────
+#
+# A vault has exactly one way in. Switching rewraps the data key under the
+# new secret and retires the old wrapping; the entries are never touched, so
+# nothing can be lost in the move.
 
-def set_master_password(session: VaultSession, master_password: str):
-    """Attach (or replace) the master password of an unlocked vault."""
-    _store_method(session.vault_id, METHOD_MASTER, "", master_password, session.dek)
+def switch_to_master(session: VaultSession, master_password: str):
+    """Make a master password the only way into this vault."""
+    _store_method(session.vault_id, METHOD_MASTER, "", master_password,
+                  session.dek, exclusive=True)
+    session.method   = METHOD_MASTER
+    session.identity = ""
 
 
-def set_ad_unlock(session: VaultSession, username: str, ad_password: str):
-    """Attach (or refresh) AD unlock for an unlocked vault."""
-    _store_method(session.vault_id, METHOD_AD,
-                  database.hash_identity(username), ad_password, session.dek)
+def switch_to_ad(session: VaultSession, username: str, ad_password: str):
+    """Make an AD account the only way into this vault."""
+    identity = database.hash_identity(username)
+    _store_method(session.vault_id, METHOD_AD, identity, ad_password,
+                  session.dek, exclusive=True)
+    session.method       = METHOD_AD
+    session.identity     = identity
+    session.display_name = username
 
 
-def remove_method(session: VaultSession, method: str, identity: str) -> bool:
-    """
-    Drop an unlock method. Refuses to remove the last one — that would lock
-    the vault permanently.
-    """
-    if database.count_unlock_methods(session.vault_id) <= 1:
-        return False
-    database.delete_unlock_method(session.vault_id, method, identity)
-    return True
+def current_method(vault_id: str):
+    """The vault's active unlock method, or None if it somehow has none."""
+    rows = database.list_unlock_methods(vault_id)
+    return rows[0] if rows else None
 
 
 # ── Migration from the pre-vault schema ───────────────────────────

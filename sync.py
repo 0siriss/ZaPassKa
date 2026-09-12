@@ -164,6 +164,11 @@ def merge_snapshot(remote: dict) -> MergeResult:
         })
         result.entries_applied += 1
 
+    # Two machines apart can each switch method, and the merge would then
+    # bring both back. A vault has exactly one way in, so settle on the newest.
+    if database.enforce_single_method(vault_id):
+        result.methods_applied += 1
+
     return result
 
 

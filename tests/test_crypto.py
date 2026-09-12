@@ -52,52 +52,65 @@ class TestUnlockMethods(VaultTestCase):
         self.assertIsNone(opened)
         self.assertEqual(status, crypto.NO_METHOD)
 
-    def test_both_methods_open_the_same_vault(self):
-        """The point of wrapping: AD and master password reach one data key."""
+    def test_switching_replaces_the_way_in_and_keeps_the_entries(self):
+        """One vault, one way in: the new method works, the old one stops."""
         session = crypto.create_vault(
             METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
         enc = crypto.encrypt_row(session.dek, "GitHub", "jdoe@corp", "s3cret")
         database.insert_entry(session.vault_id, enc["service_enc"],
                               enc["login_enc"], enc["password_enc"])
 
-        crypto.set_master_password(session, "my master pw")
+        crypto.switch_to_master(session, "my master pw")
 
         via_master, status = crypto.unlock_with_master("my master pw")
         self.assertEqual(status, crypto.OK)
         self.assertEqual(via_master.vault_id, session.vault_id)
+        self.assertEqual(crypto.unlock_with_ad("jdoe", "ad-pw")[1], crypto.NO_METHOD)
 
-        rows = database.get_entries(via_master.vault_id)
-        entry = crypto.decrypt_row(via_master.dek, rows[0])
+        entry = crypto.decrypt_row(
+            via_master.dek, database.get_entries(via_master.vault_id)[0])
         self.assertEqual(entry["password"], "s3cret")
 
-    def test_switch_to_master_password_and_back(self):
-        """Leaving AD for a master password and returning keeps the entries."""
+    def test_a_vault_never_has_two_ways_in(self):
+        session = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+
+        crypto.switch_to_master(session, "my master pw")
+        self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
+
+        crypto.switch_to_ad(session, "jdoe", "ad-pw")
+        self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
+
+    def test_the_session_follows_the_switch(self):
+        session = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+
+        crypto.switch_to_master(session, "my master pw")
+
+        self.assertEqual(session.method, METHOD_MASTER)
+        self.assertEqual(crypto.current_method(session.vault_id)["method"],
+                         METHOD_MASTER)
+
+    def test_switching_there_and_back_keeps_the_entries(self):
+        """Leaving AD for a master password and returning loses nothing."""
         session = crypto.create_vault(
             METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
         enc = crypto.encrypt_row(session.dek, "Jira", "jdoe", "hunter2")
         database.insert_entry(session.vault_id, enc["service_enc"],
                               enc["login_enc"], enc["password_enc"])
 
-        crypto.set_master_password(session, "master pw")
-        self.assertTrue(crypto.remove_method(
-            session, METHOD_AD, database.hash_identity("jdoe")))
-
+        crypto.switch_to_master(session, "master pw")
         via_master, _ = crypto.unlock_with_master("master pw")
         self.assertIsNotNone(via_master)
         self.assertIsNone(crypto.unlock_with_ad("jdoe", "ad-pw")[0])
 
-        crypto.set_ad_unlock(via_master, "jdoe", "ad-pw")
+        crypto.switch_to_ad(via_master, "jdoe", "ad-pw")
         back, status = crypto.unlock_with_ad("jdoe", "ad-pw")
 
         self.assertEqual(status, crypto.OK)
+        self.assertEqual(crypto.unlock_with_master("master pw")[1], crypto.NO_METHOD)
         entry = crypto.decrypt_row(back.dek, database.get_entries(back.vault_id)[0])
         self.assertEqual(entry["password"], "hunter2")
-
-    def test_last_unlock_method_cannot_be_removed(self):
-        session = crypto.create_vault(METHOD_MASTER, "", "only way in")
-
-        self.assertFalse(crypto.remove_method(session, METHOD_MASTER, ""))
-        self.assertIsNotNone(crypto.unlock_with_master("only way in")[0])
 
     def test_changed_ad_password_recovers_with_the_old_one(self):
         session = crypto.create_vault(
@@ -118,34 +131,6 @@ class TestUnlockMethods(VaultTestCase):
         self.assertEqual(status, crypto.OK)
         entry = crypto.decrypt_row(again.dek, database.get_entries(again.vault_id)[0])
         self.assertEqual(entry["password"], "vpn-pass")
-
-    def test_a_master_password_is_the_way_back_after_a_forgotten_ad_password(self):
-        """Domain password changed and the old one forgotten: master password wins."""
-        session = crypto.create_vault(
-            METHOD_AD, database.hash_identity("jdoe"), "old-pw", "jdoe")
-        enc = crypto.encrypt_row(session.dek, "VPN", "jdoe", "vpn-pass")
-        database.insert_entry(session.vault_id, enc["service_enc"],
-                              enc["login_enc"], enc["password_enc"])
-        crypto.set_master_password(session, "master pw")
-
-        self.assertTrue(crypto.has_master_fallback("jdoe"))
-        self.assertEqual(crypto.unlock_with_ad("jdoe", "new-pw")[1], crypto.WRONG_SECRET)
-
-        rescued, status = crypto.unlock_with_master("master pw")
-        self.assertEqual(status, crypto.OK)
-
-        # Re-attaching the account with the new domain password restores AD login.
-        crypto.set_ad_unlock(rescued, "jdoe", "new-pw")
-        again, status = crypto.unlock_with_ad("jdoe", "new-pw")
-
-        self.assertEqual(status, crypto.OK)
-        entry = crypto.decrypt_row(again.dek, database.get_entries(again.vault_id)[0])
-        self.assertEqual(entry["password"], "vpn-pass")
-
-    def test_without_a_master_password_there_is_no_fallback(self):
-        crypto.create_vault(METHOD_AD, database.hash_identity("jdoe"), "old-pw")
-
-        self.assertFalse(crypto.has_master_fallback("jdoe"))
 
     def test_recovery_rejects_a_wrong_old_password(self):
         crypto.create_vault(METHOD_AD, database.hash_identity("jdoe"), "old-pw")

@@ -206,12 +206,65 @@ def save_unlock_method(vault_id: str, method: str, identity: str,
 def delete_unlock_method(vault_id: str, method: str, identity: str):
     """Soft delete, so the removal reaches the other machines through sync."""
     with get_connection() as conn:
+        _tombstone(conn, vault_id, "AND method=? AND identity=?", (method, identity))
+
+
+def _tombstone(conn: sqlite3.Connection, vault_id: str, extra: str, params: tuple):
+    conn.execute(
+        f"""UPDATE unlock_methods
+               SET deleted=1, updated_at=?, salt='', wrapped_dek=X''
+             WHERE vault_id=? AND deleted=0 {extra}""",
+        (utcnow(), vault_id, *params)
+    )
+
+
+def replace_unlock_method(vault_id: str, method: str, identity: str,
+                          salt_hex: str, wrapped_dek: bytes):
+    """
+    Make this the vault's only way in, in one transaction.
+
+    The new method is written before the old ones are tombstoned, so a crash
+    halfway through leaves the vault openable by both rather than by neither.
+    """
+    with get_connection() as conn:
         conn.execute(
-            """UPDATE unlock_methods
-                  SET deleted=1, updated_at=?, salt='', wrapped_dek=X''
-                WHERE vault_id=? AND method=? AND identity=?""",
-            (utcnow(), vault_id, method, identity)
+            """INSERT INTO unlock_methods
+                   (vault_id, method, identity, salt, wrapped_dek, updated_at, deleted)
+               VALUES (?,?,?,?,?,?,0)
+               ON CONFLICT(vault_id, method, identity) DO UPDATE SET
+                   salt        = excluded.salt,
+                   wrapped_dek = excluded.wrapped_dek,
+                   updated_at  = excluded.updated_at,
+                   deleted     = 0""",
+            (vault_id, method, identity, salt_hex, wrapped_dek, utcnow())
         )
+        _tombstone(conn, vault_id, "AND NOT (method=? AND identity=?)",
+                   (method, identity))
+
+
+def enforce_single_method(vault_id: str) -> int:
+    """
+    Keep only the newest unlock method of a vault, tombstoning the rest.
+
+    A vault is meant to have exactly one. Two machines can still each switch
+    method while apart, and the merge would then bring both back to life.
+    Resolving by updated_at leaves every machine with the same survivor.
+    Returns how many were dropped.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT method, identity FROM unlock_methods
+                WHERE vault_id=? AND deleted=0
+                ORDER BY updated_at DESC, method, identity""",
+            (vault_id,)
+        ).fetchall()
+        if len(rows) <= 1:
+            return 0
+
+        keep = rows[0]
+        _tombstone(conn, vault_id, "AND NOT (method=? AND identity=?)",
+                   (keep["method"], keep["identity"]))
+        return len(rows) - 1
 
 
 def upsert_unlock_method_raw(row: dict):

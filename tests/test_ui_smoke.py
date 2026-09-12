@@ -251,27 +251,38 @@ class TestStayOnTopSetting(UiTestCase):
 
 class TestSecurityDialog(UiTestCase):
 
-    def test_it_lists_every_unlock_method(self):
+    def test_an_ad_vault_offers_the_master_password(self):
         from vault_window import SecurityDialog
 
         session = crypto.create_vault(
             METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
-        crypto.set_master_password(session, "master password")
-
         dialog = self.track(SecurityDialog(session))
 
-        self.assertEqual(dialog._list_box.count(), 2)
-        self.assertIn("Change master password", dialog.master_btn.text())
+        self.assertIn("Active Directory", dialog.method_lbl.text())
+        self.assertIn("master password", dialog.switch_btn.text())
 
-    def test_the_only_method_cannot_be_removed(self):
+    def test_a_master_vault_offers_active_directory(self):
         from vault_window import SecurityDialog
 
         session = crypto.create_vault(METHOD_MASTER, "", "master password")
         dialog = self.track(SecurityDialog(session))
 
-        card = dialog._list_box.itemAt(0).widget()
-        remove_btn = card.findChildren(type(dialog.master_btn))[0]
-        self.assertFalse(remove_btn.isEnabled())
+        self.assertIn("Master password", dialog.method_lbl.text())
+        self.assertIn("Active Directory", dialog.switch_btn.text())
+
+    def test_switching_updates_what_the_dialog_shows(self):
+        from vault_window import SecurityDialog
+
+        session = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+        dialog = self.track(SecurityDialog(session))
+
+        crypto.switch_to_master(session, "master password")
+        dialog._refresh()
+
+        self.assertIn("Master password", dialog.method_lbl.text())
+        self.assertIn("Active Directory", dialog.switch_btn.text())
+        self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
 
 
 class TestEntryDialog(UiTestCase):

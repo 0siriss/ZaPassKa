@@ -164,13 +164,13 @@ class TestSnapshotTransfer(TwoMachineTestCase):
 
 class TestUnlockMethodSync(TwoMachineTestCase):
 
-    def test_a_master_password_added_on_one_machine_works_on_the_other(self):
+    def test_a_switch_on_one_machine_reaches_the_other(self):
         self.on("A")
         session = crypto.create_vault(
             METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
         self.add_entry(session, "VPN", "jdoe", "vpn-pass")
 
-        crypto.set_master_password(session, "master pw")
+        crypto.switch_to_master(session, "master pw")
         snapshot = sync.build_snapshot(session.vault_id)
 
         self.on("B")
@@ -179,12 +179,12 @@ class TestUnlockMethodSync(TwoMachineTestCase):
 
         self.assertEqual(status, crypto.OK)
         self.assertEqual(self.services(opened), {"VPN"})
+        self.assertEqual(crypto.unlock_with_ad("jdoe", "ad-pw")[1], crypto.NO_METHOD)
 
-    def test_a_removed_unlock_method_does_not_come_back(self):
+    def test_a_retired_unlock_method_does_not_come_back(self):
         self.on("A")
         session = crypto.create_vault(
             METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
-        crypto.set_master_password(session, "master pw")
         to_b = sync.build_snapshot(session.vault_id)
 
         self.on("B")
@@ -192,38 +192,90 @@ class TestUnlockMethodSync(TwoMachineTestCase):
         self.assertIsNotNone(crypto.unlock_with_ad("jdoe", "ad-pw")[0])
 
         self.on("A")
-        crypto.remove_method(session, METHOD_AD, database.hash_identity("jdoe"))
+        crypto.switch_to_master(session, "master pw")
         to_b_again = sync.build_snapshot(session.vault_id)
 
         self.on("B")
         sync.merge_snapshot(to_b_again)
         self.assertIsNone(crypto.unlock_with_ad("jdoe", "ad-pw")[0])
 
-        # B's own snapshot must not re-add the method on A.
+        # B's own snapshot must not revive the domain account on A.
         back_to_a = sync.build_snapshot(session.vault_id)
         self.on("A")
         sync.merge_snapshot(back_to_a)
         self.assertIsNone(crypto.unlock_with_ad("jdoe", "ad-pw")[0])
 
-    def test_a_changed_ad_password_reaches_the_other_machine(self):
+    def test_the_same_switch_on_both_machines_keeps_the_later_one(self):
+        """Both moved to a master password: one key, so newest wins."""
         self.on("A")
         session = crypto.create_vault(
-            METHOD_AD, database.hash_identity("jdoe"), "old-pw", "jdoe")
-        to_b = sync.build_snapshot(session.vault_id)
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+        self.add_entry(session, "VPN", "jdoe", "vpn-pass")
+        shared = sync.build_snapshot(session.vault_id)
 
         self.on("B")
-        sync.merge_snapshot(to_b)
+        sync.merge_snapshot(shared)
+        on_b, _ = crypto.unlock_with_ad("jdoe", "ad-pw")
+        crypto.switch_to_master(on_b, "b master pw")
+        from_b = sync.build_snapshot(on_b.vault_id)
 
         self.on("A")
-        crypto.recover_with_old_ad_password("jdoe", "old-pw", "new-pw")
-        to_b_again = sync.build_snapshot(session.vault_id)
+        crypto.switch_to_master(session, "a master pw")     # later than B's
+        sync.merge_snapshot(from_b)
+
+        self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
+        opened, status = crypto.unlock_with_master("a master pw")
+        self.assertEqual(status, crypto.OK)
+        self.assertEqual(self.services(opened), {"VPN"})
+
+    def test_different_switches_on_both_machines_settle_on_one_method(self):
+        """
+        A went to a master password while B went to the domain. The merge sees
+        two live methods on different keys, and the vault must end up with one.
+        """
+        self.on("A")
+        session = crypto.create_vault(METHOD_MASTER, "", "orig pw")
+        self.add_entry(session, "VPN", "jdoe", "vpn-pass")
+        shared = sync.build_snapshot(session.vault_id)
 
         self.on("B")
-        sync.merge_snapshot(to_b_again)
+        sync.merge_snapshot(shared)
+        on_b, _ = crypto.unlock_with_master("orig pw")
+        crypto.switch_to_ad(on_b, "jdoe", "ad-pw")
+        from_b = sync.build_snapshot(on_b.vault_id)
 
-        self.assertEqual(crypto.unlock_with_ad("jdoe", "new-pw")[1], crypto.OK)
-        self.assertEqual(crypto.unlock_with_ad("jdoe", "old-pw")[1],
-                         crypto.WRONG_SECRET)
+        self.on("A")
+        crypto.switch_to_master(session, "a master pw")     # later than B's switch
+        result = sync.merge_snapshot(from_b)
+
+        self.assertTrue(result.methods_applied)
+        self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
+        self.assertEqual(crypto.unlock_with_master("a master pw")[1], crypto.OK)
+        self.assertEqual(crypto.unlock_with_ad("jdoe", "ad-pw")[1], crypto.NO_METHOD)
+
+    def test_both_machines_reach_the_same_surviving_method(self):
+        """Whichever order they sync in, A and B must agree on the way in."""
+        self.on("A")
+        session = crypto.create_vault(METHOD_MASTER, "", "orig pw")
+        shared = sync.build_snapshot(session.vault_id)
+
+        self.on("B")
+        sync.merge_snapshot(shared)
+        on_b, _ = crypto.unlock_with_master("orig pw")
+        crypto.switch_to_ad(on_b, "jdoe", "ad-pw")
+        from_b = sync.build_snapshot(on_b.vault_id)
+
+        self.on("A")
+        crypto.switch_to_master(session, "a master pw")
+        sync.merge_snapshot(from_b)
+        from_a = sync.build_snapshot(session.vault_id)
+
+        self.on("B")
+        sync.merge_snapshot(from_a)
+
+        self.assertEqual(database.count_unlock_methods(session.vault_id), 1)
+        self.assertEqual(crypto.unlock_with_master("a master pw")[1], crypto.OK)
+        self.assertEqual(crypto.unlock_with_ad("jdoe", "ad-pw")[1], crypto.NO_METHOD)
 
 
 class TestSnapshotFormat(TwoMachineTestCase):
