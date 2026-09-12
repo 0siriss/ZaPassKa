@@ -119,6 +119,34 @@ class TestUnlockMethods(VaultTestCase):
         entry = crypto.decrypt_row(again.dek, database.get_entries(again.vault_id)[0])
         self.assertEqual(entry["password"], "vpn-pass")
 
+    def test_a_master_password_is_the_way_back_after_a_forgotten_ad_password(self):
+        """Domain password changed and the old one forgotten: master password wins."""
+        session = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "old-pw", "jdoe")
+        enc = crypto.encrypt_row(session.dek, "VPN", "jdoe", "vpn-pass")
+        database.insert_entry(session.vault_id, enc["service_enc"],
+                              enc["login_enc"], enc["password_enc"])
+        crypto.set_master_password(session, "master pw")
+
+        self.assertTrue(crypto.has_master_fallback("jdoe"))
+        self.assertEqual(crypto.unlock_with_ad("jdoe", "new-pw")[1], crypto.WRONG_SECRET)
+
+        rescued, status = crypto.unlock_with_master("master pw")
+        self.assertEqual(status, crypto.OK)
+
+        # Re-attaching the account with the new domain password restores AD login.
+        crypto.set_ad_unlock(rescued, "jdoe", "new-pw")
+        again, status = crypto.unlock_with_ad("jdoe", "new-pw")
+
+        self.assertEqual(status, crypto.OK)
+        entry = crypto.decrypt_row(again.dek, database.get_entries(again.vault_id)[0])
+        self.assertEqual(entry["password"], "vpn-pass")
+
+    def test_without_a_master_password_there_is_no_fallback(self):
+        crypto.create_vault(METHOD_AD, database.hash_identity("jdoe"), "old-pw")
+
+        self.assertFalse(crypto.has_master_fallback("jdoe"))
+
     def test_recovery_rejects_a_wrong_old_password(self):
         crypto.create_vault(METHOD_AD, database.hash_identity("jdoe"), "old-pw")
 

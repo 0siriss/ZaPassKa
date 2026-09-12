@@ -19,10 +19,15 @@ import cloud_sync
 import crypto
 import database
 import gdrive
+import settings
 import theme
 from database import METHOD_MASTER
 
 CLIPBOARD_CLEAR_MS = 30_000
+
+# How long closing waits for a sync already in flight. Dropping a running
+# thread aborts the process, and the entry is safe in SQLite either way.
+SYNC_SHUTDOWN_WAIT_MS = 5_000
 
 COL_SERVICE  = 0
 COL_LOGIN    = 1
@@ -387,9 +392,8 @@ class SecurityDialog(QDialog):
         self._refresh()
 
     def _add_ad_unlock(self):
-        from login_window import app_settings
-        settings = app_settings()
-        dlg = AdUnlockDialog(self, server=settings.value("ad_server", ""),
+        store = settings.app_settings()
+        dlg = AdUnlockDialog(self, server=store.value(settings.KEY_AD_SERVER, ""),
                              username=self._session.display_name)
         while dlg.exec() == QDialog.DialogCode.Accepted:
             server, username, password = dlg.values()
@@ -404,8 +408,8 @@ class SecurityDialog(QDialog):
             self._busy("Wrapping the vault key…")
             QApplication.processEvents()
             crypto.set_ad_unlock(self._session, username, password)
-            settings.setValue("ad_server", server)
-            settings.sync()
+            store.setValue(settings.KEY_AD_SERVER, server)
+            store.sync()
 
             self._busy(None)
             self.changed = True
@@ -447,8 +451,8 @@ class VaultWindow(QWidget):
         super().__init__()
         self._session = session
         self._rows: list[dict] = []
-        self._visible: set[str] = set()      # entry uuids shown in clear text
-        self._on_top = True
+        self._visible_uuid: str | None = None   # at most one password in clear text
+        self._on_top = settings.stay_on_top()
         self._sync_worker  = None
         self._sync_running = False
         self._sync_pending = False
@@ -457,7 +461,7 @@ class VaultWindow(QWidget):
         self.setWindowTitle("ZaPassKa (password manager)")
         self.setMinimumSize(940, 560)
         self.resize(1040, 640)
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._on_top)
         self.setStyleSheet(theme.VAULT_STYLE)
 
         self._build_ui()
@@ -513,13 +517,13 @@ class VaultWindow(QWidget):
         security_btn.clicked.connect(self._open_security)
         top.addWidget(security_btn)
 
-        self.pin_btn = QPushButton("📌 On Top")
+        self.pin_btn = QPushButton()
         self.pin_btn.setObjectName("pinBtn")
         self.pin_btn.setCheckable(True)
-        self.pin_btn.setChecked(True)
         self.pin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.pin_btn.setToolTip("Toggle always-on-top")
+        self.pin_btn.setToolTip("Toggle always-on-top, remembered between sessions")
         self.pin_btn.clicked.connect(self._toggle_on_top)
+        self._update_pin_button()
         top.addWidget(self.pin_btn)
 
         logout_btn = QPushButton("Sign out")
@@ -590,7 +594,7 @@ class VaultWindow(QWidget):
 
     def _fill_row(self, index: int, row_data: dict):
         entry_uuid = row_data["uuid"]
-        shown      = entry_uuid in self._visible
+        shown      = entry_uuid == self._visible_uuid
 
         for column, text in ((COL_SERVICE, row_data["service"]),
                              (COL_LOGIN, row_data["login"])):
@@ -656,7 +660,8 @@ class VaultWindow(QWidget):
         self._render(rows)
 
     def _toggle_pw(self, entry_uuid: str):
-        self._visible.symmetric_difference_update({entry_uuid})
+        """Only one password is ever readable — opening one closes the other."""
+        self._visible_uuid = None if entry_uuid == self._visible_uuid else entry_uuid
         self._filter(self.search_edit.text())
 
     def _copy_pw(self, password: str):
@@ -713,7 +718,8 @@ class VaultWindow(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         database.delete_entry(row_data["uuid"])
-        self._visible.discard(row_data["uuid"])
+        if self._visible_uuid == row_data["uuid"]:
+            self._visible_uuid = None
         self._after_change()
 
     def _after_change(self):
@@ -774,15 +780,28 @@ class VaultWindow(QWidget):
 
     def _toggle_on_top(self):
         self._on_top = not self._on_top
+        settings.set_stay_on_top(self._on_top)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._on_top)
         self.show()                          # required to apply the flag change
+        self._update_pin_button()
+
+    def _update_pin_button(self):
+        self.pin_btn.setChecked(self._on_top)
         self.pin_btn.setText("📌 On Top" if self._on_top else "📌 Off")
 
     def _logout(self):
         from login_window import LoginWindow
         self._session.close()
-        self._visible.clear()
+        self._visible_uuid = None
         self._rows = []
         self._login_win = LoginWindow()
         self._login_win.show()
         self.close()
+
+    def closeEvent(self, event):
+        if self._clip_timer:
+            self._clip_timer.stop()
+        if self._sync_worker and self._sync_worker.isRunning():
+            self._sync_pending = False
+            self._sync_worker.wait(SYNC_SHUTDOWN_WAIT_MS)
+        super().closeEvent(event)

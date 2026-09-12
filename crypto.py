@@ -198,6 +198,19 @@ def rewrap_method(vault_id: str, method: str, identity: str,
     return True
 
 
+def has_master_fallback(username: str) -> bool:
+    """
+    True when a vault this AD account unlocks also has a master password.
+    Used to tell a user who forgot their previous domain password whether
+    there is still a way in.
+    """
+    return any(
+        database.get_unlock_method(row["vault_id"], METHOD_MASTER, "") is not None
+        for row in database.find_unlock_methods(METHOD_AD,
+                                                database.hash_identity(username))
+    )
+
+
 def recover_with_old_ad_password(username: str, old_password: str,
                                  new_password: str) -> VaultSession | None:
     """

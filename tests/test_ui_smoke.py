@@ -125,6 +125,34 @@ class TestVaultWindow(UiTestCase):
         window._toggle_pw(uuid)
         self.assertNotEqual(window.table.item(0, 2).text(), "gh-pass")
 
+    def test_showing_one_password_hides_the_other(self):
+        import theme
+
+        window, _ = self._open_vault([
+            ("GitHub", "jdoe", "gh-pass"),
+            ("Jira",   "jdoe", "jira-pass"),
+        ])
+        first, second = (row["uuid"] for row in window._rows)
+
+        window._toggle_pw(first)
+        self.assertEqual(window.table.item(0, 2).text(), "gh-pass")
+        self.assertEqual(window.table.item(1, 2).text(), theme.PASS_MASK)
+
+        window._toggle_pw(second)
+        self.assertEqual(window.table.item(0, 2).text(), theme.PASS_MASK)
+        self.assertEqual(window.table.item(1, 2).text(), "jira-pass")
+
+    def test_deleting_the_open_entry_clears_the_visible_one(self):
+        window, _ = self._open_vault()
+        uuid = window._rows[0]["uuid"]
+
+        window._toggle_pw(uuid)
+        database.delete_entry(uuid)
+        window._visible_uuid = None if window._visible_uuid == uuid else window._visible_uuid
+        window._load_rows()
+
+        self.assertIsNone(window._visible_uuid)
+
     def test_search_filters_the_table(self):
         window, _ = self._open_vault([
             ("GitHub", "jdoe", "gh-pass"),
@@ -175,6 +203,50 @@ class TestVaultWindow(UiTestCase):
         window._request_sync()
 
         self.assertIn("not connected", window._sync_status.text())
+
+
+class TestStayOnTopSetting(UiTestCase):
+    """The pin state is a stored preference, not a per-session default."""
+
+    def setUp(self):
+        super().setUp()
+        import settings
+        self._saved = settings.stay_on_top()
+
+    def tearDown(self):
+        import settings
+        settings.set_stay_on_top(self._saved)
+        super().tearDown()
+
+    def _open_vault(self):
+        from vault_window import VaultWindow
+
+        session = crypto.create_vault(METHOD_MASTER, "", "master password", "master")
+        return self.track(VaultWindow(session))
+
+    def test_a_new_window_follows_the_stored_choice(self):
+        import settings
+
+        settings.set_stay_on_top(False)
+        window = self._open_vault()
+
+        self.assertFalse(window._on_top)
+        self.assertFalse(window.pin_btn.isChecked())
+        self.assertIn("Off", window.pin_btn.text())
+
+    def test_toggling_stores_the_new_choice(self):
+        import settings
+
+        settings.set_stay_on_top(True)
+        window = self._open_vault()
+
+        window._toggle_on_top()
+        self.assertFalse(settings.stay_on_top())
+        self.assertFalse(window.pin_btn.isChecked())
+
+        window._toggle_on_top()
+        self.assertTrue(settings.stay_on_top())
+        self.assertTrue(window.pin_btn.isChecked())
 
 
 class TestSecurityDialog(UiTestCase):

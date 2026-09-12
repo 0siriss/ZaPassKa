@@ -14,7 +14,7 @@ Both open the same vault. Which one was used last is remembered in QSettings
 
 import os
 
-from PyQt6.QtCore import Qt, QSettings, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget
@@ -26,18 +26,12 @@ import database
 import gdrive
 import theme
 from database import METHOD_AD, METHOD_MASTER
-
-ORG_NAME = "ZaPassKa"
-APP_NAME = "ZaPassKa"
+from settings import KEY_AD_SERVER, KEY_AUTH_MODE, app_settings
 
 MODE_AD     = "ad"
 MODE_MASTER = "master"
 
 MIN_MASTER_LENGTH = 8
-
-
-def app_settings() -> QSettings:
-    return QSettings(ORG_NAME, APP_NAME)
 
 
 def pull_snapshots():
@@ -580,17 +574,17 @@ class LoginWindow(QWidget):
                     "create a new empty vault below."
                 )
 
-        app_settings().setValue("auth_mode", mode)
+        app_settings().setValue(KEY_AUTH_MODE, mode)
 
     # ── Settings ──────────────────────────────────────────────────
 
     def _load_settings(self):
         settings = app_settings()
-        server = settings.value("ad_server", "")
+        server = settings.value(KEY_AD_SERVER, "")
         if server:
             self.server_edit.setText(server)
 
-        mode = settings.value("auth_mode", MODE_AD)
+        mode = settings.value(KEY_AUTH_MODE, MODE_AD)
         if mode not in (MODE_AD, MODE_MASTER):
             mode = MODE_AD
         if mode == MODE_MASTER and not database.has_method(METHOD_MASTER):
@@ -599,7 +593,7 @@ class LoginWindow(QWidget):
 
     def _save_settings(self):
         settings = app_settings()
-        settings.setValue("ad_server", self.server_edit.text().strip())
+        settings.setValue(KEY_AD_SERVER, self.server_edit.text().strip())
         settings.sync()
 
     # ── DC ping ───────────────────────────────────────────────────
@@ -777,9 +771,17 @@ class LoginWindow(QWidget):
                 return
             dlg.show_error("That is not the previous password. Try again.")
 
-        self._show_error(
-            "Vault not opened. It stays encrypted with your previous AD "
-            "password until you enter it.")
+        if crypto.has_master_fallback(self._username):
+            self._show_info(
+                "Vault not opened. Switch to Master password above to get in, "
+                "then re-add this account under Security so your new domain "
+                "password works next time."
+            )
+        else:
+            self._show_error(
+                "Vault not opened. It is still encrypted with your previous AD "
+                "password and only that password can unwrap it."
+            )
 
     def _create_master_vault(self):
         dlg = MasterPasswordDialog(
