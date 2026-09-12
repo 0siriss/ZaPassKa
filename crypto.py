@@ -1,180 +1,296 @@
 """
-crypto.py — Key derivation & encryption
+crypto.py — key management & encryption.
 
-Key derivation : scrypt (N=2^17, r=8, p=1) — memory-hard
-Encryption     : AES-256-GCM (AEAD)
+Key hierarchy
+-------------
+Every vault owns a random 256-bit **data key (DEK)**. Entries are encrypted
+with the DEK and nothing else.
 
-Blob format    : nonce(12) + ciphertext + tag(16)
+Each way of unlocking the vault — Active Directory credentials or a master
+password — derives a **key-encryption key (KEK)** from its own secret with
+scrypt and its own random salt, and stores the DEK wrapped under that KEK.
 
-Verifier       : AES-GCM encrypt of known constant with derived key.
-                 Used to detect AD password change without storing the password.
+    AD password ──scrypt(salt_ad)──► KEK_ad ──► wrap(DEK)
+    master pw   ──scrypt(salt_mp)──► KEK_mp ──► wrap(DEK)
+                                                  │
+                                     entries ◄────┘ AES-256-GCM
+
+Consequences:
+  * Both unlock methods open the same entries.
+  * Switching between them, or changing either secret, only rewraps the DEK —
+    entries are never re-encrypted and can never be lost in the process.
+  * A failed unwrap (InvalidTag) is itself the wrong-secret check, so no
+    password or verifier needs to be stored.
+
+Blob format everywhere: nonce(12) + ciphertext + tag(16).
 """
 
 import os
+from dataclasses import dataclass
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.backends import default_backend
-from cryptography.exceptions import InvalidTag
 
-_SCRYPT_N   = 2 ** 17
-_SCRYPT_R   = 8
-_SCRYPT_P   = 1
-_KEY_LEN    = 32       # 256 bits
-_NONCE_LEN  = 12       # 96 bits
+import database
+from database import METHOD_AD, METHOD_MASTER
 
-# Known plaintext used to verify a key is correct.
-# Changing this constant will invalidate all existing verifiers.
+_SCRYPT_N  = 2 ** 17      # ~1 s, 128 MB
+_SCRYPT_R  = 8
+_SCRYPT_P  = 1
+_KEY_LEN   = 32           # 256 bits
+_NONCE_LEN = 12           # 96 bits
+_SALT_LEN  = 32
+
+# Legacy (pre-vault) schema constant — see migrate_legacy_user.
 _VERIFIER_MAGIC = b"ZaymerPassKeeker_V1"
 
+# Unlock outcomes
+OK           = "ok"
+NO_METHOD    = "no_method"      # nothing stored for this identity yet
+WRONG_SECRET = "wrong_secret"   # secret does not unwrap the data key
 
-# ── Key derivation ────────────────────────────────────────────────
 
-def _scrypt(password: str, salt: bytes) -> bytes:
+@dataclass
+class VaultSession:
+    """An unlocked vault. `dek` lives only in memory, for this session."""
+    vault_id: str
+    dek: bytes
+    method: str
+    identity: str
+    display_name: str = ""
+
+    def close(self):
+        self.dek = b""
+
+
+# ── Key derivation & wrapping ─────────────────────────────────────
+
+def derive_kek(secret: str, salt: bytes) -> bytes:
     kdf = Scrypt(
-        salt=salt,
-        length=_KEY_LEN,
-        n=_SCRYPT_N,
-        r=_SCRYPT_R,
-        p=_SCRYPT_P,
+        salt=salt, length=_KEY_LEN,
+        n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
         backend=default_backend()
     )
-    return kdf.derive(password.encode("utf-8"))
+    return kdf.derive(secret.encode("utf-8"))
 
 
-def derive_key(username: str, password: str) -> tuple[bytes, bool]:
-    """
-    Derive encryption key for username+password.
-
-    Flow:
-      1. Look up salt + verifier in DB.
-      2a. First login (no record): generate salt, derive key, create verifier → save.
-      2b. Normal login: derive key, verify → return key.
-      2c. Password changed: verifier mismatch → return (None, False).
-           Caller must show migration dialog.
-
-    Returns:
-      (key, True)   — key is valid, proceed normally
-      (None, False) — verifier mismatch, AD password was changed
-    """
-    import database
-
-    record = database.get_kdf_record(username)
-
-    if record is None:
-        # First login — bootstrap
-        salt = os.urandom(32)
-        key  = _scrypt(password, salt)
-        verifier = _make_verifier(key)
-        database.save_kdf_record(username, salt.hex(), verifier)
-        return key, True
-
-    salt     = bytes.fromhex(record["salt"])
-    verifier = record["verifier"]
-    key      = _scrypt(password, salt)
-
-    if verifier is None:
-        # Existing user from old schema without verifier — adopt key
-        database.save_kdf_record(username, salt.hex(), _make_verifier(key))
-        return key, True
-
-    if _check_verifier(key, bytes(verifier)):
-        return key, True
-
-    # Verifier mismatch — password changed in AD
-    return None, False
+def wrap_dek(kek: bytes, dek: bytes) -> bytes:
+    nonce = os.urandom(_NONCE_LEN)
+    return nonce + AESGCM(kek).encrypt(nonce, dek, None)
 
 
-def reencrypt_all(username: str, old_password: str, new_password: str) -> bool:
-    """
-    Re-encrypt all password rows with new key.
-    Called after AD password change is detected.
-
-    Returns True on success, False if old_password is wrong.
-    """
-    import database
-
-    record = database.get_kdf_record(username)
-    if record is None:
-        return False
-
-    salt    = bytes.fromhex(record["salt"])
-    old_key = _scrypt(old_password, salt)
-
-    # Verify old key is actually correct
-    if not _check_verifier(old_key, bytes(record["verifier"])):
-        return False
-
-    # Decrypt all rows with old key
-    db_rows = database.get_all_passwords()
+def unwrap_dek(kek: bytes, wrapped: bytes) -> bytes | None:
+    """Return the data key, or None when the secret is wrong."""
     try:
-        plain_rows = [decrypt_row(old_key, r) for r in db_rows]
+        return AESGCM(kek).decrypt(wrapped[:_NONCE_LEN], wrapped[_NONCE_LEN:], None)
     except InvalidTag:
+        return None
+
+
+# ── Field encryption ──────────────────────────────────────────────
+
+def encrypt(dek: bytes, plaintext: str) -> bytes:
+    nonce = os.urandom(_NONCE_LEN)
+    return nonce + AESGCM(dek).encrypt(nonce, plaintext.encode("utf-8"), None)
+
+
+def decrypt(dek: bytes, blob: bytes) -> str:
+    return AESGCM(dek).decrypt(blob[:_NONCE_LEN], blob[_NONCE_LEN:], None).decode("utf-8")
+
+
+def encrypt_row(dek: bytes, service: str, login: str, password: str) -> dict:
+    return {
+        "service_enc":  encrypt(dek, service),
+        "login_enc":    encrypt(dek, login),
+        "password_enc": encrypt(dek, password),
+    }
+
+
+def decrypt_row(dek: bytes, row) -> dict:
+    return {
+        "uuid":     row["uuid"],
+        "service":  decrypt(dek, bytes(row["service"])),
+        "login":    decrypt(dek, bytes(row["login"])),
+        "password": decrypt(dek, bytes(row["password"])),
+    }
+
+
+# ── Creating & unlocking vaults ───────────────────────────────────
+
+def create_vault(method: str, identity: str, secret: str,
+                 display_name: str = "") -> VaultSession:
+    """New vault with a random data key, unlockable by the given secret."""
+    vault_id = database.create_vault()
+    dek      = os.urandom(_KEY_LEN)
+    _store_method(vault_id, method, identity, secret, dek)
+    return VaultSession(vault_id, dek, method, identity, display_name)
+
+
+def _store_method(vault_id: str, method: str, identity: str,
+                  secret: str, dek: bytes):
+    salt = os.urandom(_SALT_LEN)
+    kek  = derive_kek(secret, salt)
+    database.save_unlock_method(vault_id, method, identity, salt.hex(), wrap_dek(kek, dek))
+
+
+def _try_unlock(rows, secret: str, method: str) -> VaultSession | None:
+    for row in rows:
+        kek = derive_kek(secret, bytes.fromhex(row["salt"]))
+        dek = unwrap_dek(kek, bytes(row["wrapped_dek"]))
+        if dek is not None:
+            return VaultSession(row["vault_id"], dek, method, row["identity"])
+    return None
+
+
+def unlock_with_ad(username: str, password: str) -> tuple[VaultSession | None, str]:
+    """
+    Open the vault tied to an AD account. Call only after AD accepted the
+    password — then a failed unwrap means the AD password has changed since
+    the vault was wrapped, not that the user mistyped.
+    """
+    identity = database.hash_identity(username)
+    rows     = database.find_unlock_methods(METHOD_AD, identity)
+
+    if not rows:
+        migrated = migrate_legacy_user(username, password)
+        if migrated is not None:
+            return migrated, OK
+        return None, NO_METHOD
+
+    session = _try_unlock(rows, password, METHOD_AD)
+    if session is None:
+        return None, WRONG_SECRET
+    session.display_name = username
+    return session, OK
+
+
+def unlock_with_master(password: str) -> tuple[VaultSession | None, str]:
+    """Open whichever vault this master password unwraps."""
+    rows = database.find_unlock_methods(METHOD_MASTER)
+    if not rows:
+        return None, NO_METHOD
+
+    session = _try_unlock(rows, password, METHOD_MASTER)
+    if session is None:
+        return None, WRONG_SECRET
+    session.display_name = "master password"
+    return session, OK
+
+
+def rewrap_method(vault_id: str, method: str, identity: str,
+                  old_secret: str, new_secret: str) -> bool:
+    """
+    Re-wrap the data key under a new secret, e.g. after an AD password change.
+    Entries are untouched. Returns False if old_secret is wrong.
+    """
+    row = database.get_unlock_method(vault_id, method, identity)
+    if row is None:
         return False
 
-    # Re-encrypt with new key
-    new_key = _scrypt(new_password, salt)
-    new_rows = []
-    for r in plain_rows:
-        enc = encrypt_row(new_key, r["service"], r["login"], r["password"])
-        new_rows.append((
-            r["id"],
-            enc["service_enc"],
-            enc["login_enc"],
-            enc["password_enc"],
-        ))
+    kek = derive_kek(old_secret, bytes.fromhex(row["salt"]))
+    dek = unwrap_dek(kek, bytes(row["wrapped_dek"]))
+    if dek is None:
+        return False
 
-    # Atomically replace all rows + update verifier
-    database.update_all_passwords(new_rows)
-    database.save_kdf_record(username, salt.hex(), _make_verifier(new_key))
+    _store_method(vault_id, method, identity, new_secret, dek)
     return True
 
 
-# ── Verifier ──────────────────────────────────────────────────────
+def recover_with_old_ad_password(username: str, old_password: str,
+                                 new_password: str) -> VaultSession | None:
+    """
+    AD password changed: unwrap with the previous password, rewrap with the
+    current one. Returns the opened session, or None if old_password is wrong.
+    """
+    identity = database.hash_identity(username)
+    rows     = database.find_unlock_methods(METHOD_AD, identity)
 
-def _make_verifier(key: bytes) -> bytes:
-    """Encrypt magic constant with key → store result as verifier."""
-    nonce = os.urandom(_NONCE_LEN)
-    ct    = AESGCM(key).encrypt(nonce, _VERIFIER_MAGIC, None)
-    return nonce + ct
+    session = _try_unlock(rows, old_password, METHOD_AD)
+    if session is None:
+        return None
+
+    _store_method(session.vault_id, METHOD_AD, identity, new_password, session.dek)
+    session.display_name = username
+    return session
 
 
-def _check_verifier(key: bytes, verifier: bytes) -> bool:
-    """Return True if key correctly decrypts the verifier blob."""
+# ── Managing unlock methods of an open vault ──────────────────────
+
+def set_master_password(session: VaultSession, master_password: str):
+    """Attach (or replace) the master password of an unlocked vault."""
+    _store_method(session.vault_id, METHOD_MASTER, "", master_password, session.dek)
+
+
+def set_ad_unlock(session: VaultSession, username: str, ad_password: str):
+    """Attach (or refresh) AD unlock for an unlocked vault."""
+    _store_method(session.vault_id, METHOD_AD,
+                  database.hash_identity(username), ad_password, session.dek)
+
+
+def remove_method(session: VaultSession, method: str, identity: str) -> bool:
+    """
+    Drop an unlock method. Refuses to remove the last one — that would lock
+    the vault permanently.
+    """
+    if database.count_unlock_methods(session.vault_id) <= 1:
+        return False
+    database.delete_unlock_method(session.vault_id, method, identity)
+    return True
+
+
+# ── Migration from the pre-vault schema ───────────────────────────
+
+def migrate_legacy_user(username: str, password: str) -> VaultSession | None:
+    """
+    Convert an old-format database (kdf_salts + passwords, everything encrypted
+    straight from the AD password) into a vault with a data key.
+
+    Only the rows this user's key can actually decrypt are moved, so several
+    users sharing one machine migrate independently. Returns None when the
+    user has no legacy data or the password does not fit it.
+    """
+    record = database.legacy_kdf_record(username)
+    if record is None:
+        return None
+
+    legacy_key = derive_kek(password, bytes.fromhex(record["salt"]))
+
+    if record["verifier"] is not None and not _check_legacy_verifier(
+            legacy_key, bytes(record["verifier"])):
+        return None
+
+    moved, row_ids = [], []
+    for row in database.legacy_passwords():
+        try:
+            moved.append((
+                decrypt(legacy_key, bytes(row["service"])),
+                decrypt(legacy_key, bytes(row["login"])),
+                decrypt(legacy_key, bytes(row["password"])),
+            ))
+            row_ids.append(row["id"])
+        except InvalidTag:
+            continue      # belongs to another user of this machine
+
+    if record["verifier"] is None and not moved:
+        # No verifier to check and nothing decrypted — can't confirm the key.
+        return None
+
+    session = create_vault(METHOD_AD, database.hash_identity(username),
+                           password, display_name=username)
+    for service, login, secret in moved:
+        enc = encrypt_row(session.dek, service, login, secret)
+        database.insert_entry(session.vault_id, enc["service_enc"],
+                              enc["login_enc"], enc["password_enc"])
+
+    database.legacy_drop_user(username, row_ids)
+    return session
+
+
+def _check_legacy_verifier(key: bytes, verifier: bytes) -> bool:
     try:
-        nonce = verifier[:_NONCE_LEN]
-        ct    = verifier[_NONCE_LEN:]
-        AESGCM(key).decrypt(nonce, ct, None)
+        AESGCM(key).decrypt(verifier[:_NONCE_LEN], verifier[_NONCE_LEN:], None)
         return True
     except InvalidTag:
         return False
-
-
-# ── Encrypt / Decrypt ─────────────────────────────────────────────
-
-def encrypt(key: bytes, plaintext: str) -> bytes:
-    nonce = os.urandom(_NONCE_LEN)
-    ct    = AESGCM(key).encrypt(nonce, plaintext.encode("utf-8"), None)
-    return nonce + ct
-
-
-def decrypt(key: bytes, blob: bytes) -> str:
-    nonce = blob[:_NONCE_LEN]
-    ct    = blob[_NONCE_LEN:]
-    return AESGCM(key).decrypt(nonce, ct, None).decode("utf-8")
-
-
-def encrypt_row(key: bytes, service: str, login: str, password: str) -> dict:
-    return {
-        "service_enc":  encrypt(key, service),
-        "login_enc":    encrypt(key, login),
-        "password_enc": encrypt(key, password),
-    }
-
-
-def decrypt_row(key: bytes, row) -> dict:
-    return {
-        "id":       row["id"],
-        "service":  decrypt(key, bytes(row["service"])),
-        "login":    decrypt(key, bytes(row["login"])),
-        "password": decrypt(key, bytes(row["password"])),
-    }
