@@ -540,9 +540,7 @@ class VaultWindow(QWidget):
         self.sync_btn = QPushButton(tr("☁ Sync"))
         self.sync_btn.setObjectName("toolBtn")
         self.sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sync_btn.setToolTip(
-            tr("Back up to Google Drive and pull other machines' changes"))
-        self.sync_btn.clicked.connect(lambda: self._request_sync(manual=True))
+        self.sync_btn.clicked.connect(self._sync_clicked)
         top.addWidget(self.sync_btn)
 
         security_btn = QPushButton(tr("🛡 Security"))
@@ -610,6 +608,9 @@ class VaultWindow(QWidget):
         self._sync_status.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 11px;")
         bottom.addWidget(self._sync_status)
         root.addLayout(bottom)
+
+        # Settle the sync button's wording before anything measures the window.
+        self._update_sync_button()
 
     # ── Data ──────────────────────────────────────────────────────
 
@@ -820,6 +821,35 @@ class VaultWindow(QWidget):
 
     # ── Google Drive sync ─────────────────────────────────────────
 
+    def _sync_clicked(self):
+        """
+        One button for both states: connect Drive when it is not set up yet,
+        sync when it is. Otherwise a migrated vault could only be connected by
+        signing out first, which nobody would guess.
+        """
+        if cloud_sync.available():
+            self._request_sync(manual=True)
+        else:
+            self._connect_drive()
+
+    def _connect_drive(self):
+        from login_window import GoogleDriveDialog
+
+        GoogleDriveDialog(self).exec()
+        self._update_sync_button()
+        if cloud_sync.available():
+            self._load_rows()          # a pull may have brought entries in
+            self._request_sync(manual=True)
+
+    def _update_sync_button(self):
+        connected = cloud_sync.available()
+        self.sync_btn.setText(tr("☁ Sync") if connected
+                              else tr("☁ Connect Drive"))
+        self.sync_btn.setToolTip(
+            tr("Back up to Google Drive and pull other machines' changes")
+            if connected else
+            tr("Set up the backup of this vault to your Google Drive"))
+
     def _request_sync(self, manual: bool = False):
         """
         Back up after every change. Without a Drive connection this is a no-op,
@@ -828,6 +858,7 @@ class VaultWindow(QWidget):
         if not cloud_sync.available():
             self._sync_status.setText(tr("☁ Drive: not connected"))
             self.sync_btn.setEnabled(True)
+            self._update_sync_button()
             return
 
         if self._sync_running:

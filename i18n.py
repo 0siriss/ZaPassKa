@@ -170,6 +170,9 @@ _RU = {
     "🔍  Search…": "🔍  Поиск…",
     "＋  Add Entry": "＋  Добавить",
     "☁ Sync": "☁ Синхрон.",
+    "☁ Connect Drive": "☁ Подключить Диск",
+    "Set up the backup of this vault to your Google Drive":
+        "Настроить резервное копирование этого хранилища на ваш Google Диск",
     "🛡 Security": "🛡 Защита",
     "📌 On Top": "📌 Поверх",
     "📌 Off": "📌 Обычно",
