@@ -56,9 +56,9 @@ jobs:
             | base64 -d > "$RUNNER_TEMP/zapasska.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/zapasska.jks" >> "$GITHUB_ENV"
 
-          # A damaged keystore fails with the same message as a wrong password,
-          # because JKS keys its integrity check on that password. Comparing
-          # these two lines with the local file tells the cases apart.
+          # Gradle reports every signing failure as "keystore password was
+          # incorrect", whichever of the three it was. These two lines rule out
+          # a damaged transfer without touching the passwords at all.
           echo "Decoded keystore: $(wc -c < "$RUNNER_TEMP/zapasska.jks") bytes"
           echo "sha256: $(sha256sum "$RUNNER_TEMP/zapasska.jks" | cut -d" " -f1)"
 
@@ -73,12 +73,13 @@ jobs:
 
           if ! keytool -list -keystore "$ANDROID_KEYSTORE_PATH" \
                        -storepass "$store" >/dev/null 2>&1; then
-            echo "::error::The keystore did not open. Either" \
-                 "ANDROID_KEYSTORE_PASSWORD is wrong, or the file arrived damaged:" \
-                 "a JKS checks its own integrity with that password, so both" \
-                 "fail the same way. Compare the sha256 printed above with" \
-                 "'sha256sum zapasska.jks' on your machine. Different means the" \
-                 "base64 is the problem, identical means the password is."
+            echo "::error::The keystore did not open. keytool said:"
+            keytool -list -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$store" 2>&1 \
+              | grep -i 'keytool error' || true
+            echo "::error::'password was incorrect' means" \
+                 "ANDROID_KEYSTORE_PASSWORD is wrong. 'Integrity check failed'" \
+                 "means the file arrived damaged: compare the sha256 above with" \
+                 "'sha256sum zapasska.jks' on your machine."
             exit 1
           fi
 
