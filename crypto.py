@@ -145,12 +145,57 @@ def _store_method(vault_id: str, method: str, identity: str,
 
 
 def _try_unlock(rows, secret: str, method: str) -> VaultSession | None:
+    """
+    Open the vault this secret unwraps.
+
+    One secret is meant to open one vault, but two machines can each start a
+    vault for the same account before they ever meet through the cloud: an old
+    database migrated separately on both, say. Once they do meet, the secret
+    opens two, and picking either one would hide half the user's passwords.
+    So every match is opened and the duplicates are folded into one.
+    """
+    sessions = []
     for row in rows:
         kek = derive_kek(secret, bytes.fromhex(row["salt"]))
         dek = unwrap_dek(kek, bytes(row["wrapped_dek"]))
         if dek is not None:
-            return VaultSession(row["vault_id"], dek, method, row["identity"])
-    return None
+            sessions.append(
+                VaultSession(row["vault_id"], dek, method, row["identity"]))
+
+    if not sessions:
+        return None
+    if len(sessions) == 1:
+        return sessions[0]
+    return _absorb_duplicates(sessions)
+
+
+def _absorb_duplicates(sessions: list[VaultSession]) -> VaultSession:
+    """
+    Fold several vaults opened by one secret into a single one.
+
+    The survivor is chosen by the lowest vault id, which every machine agrees
+    on without talking to the others. Entries are copied first and only then
+    retired from the vault they came from, so an interruption duplicates an
+    entry rather than losing it.
+    """
+    survivor = min(sessions, key=lambda session: session.vault_id)
+
+    for other in sessions:
+        if other.vault_id == survivor.vault_id:
+            continue
+        for row in database.get_entries(other.vault_id):
+            plain = decrypt_row(other.dek, row)
+            enc = encrypt_row(survivor.dek, plain["service"],
+                              plain["login"], plain["password"])
+            database.insert_entry(
+                survivor.vault_id, enc["service_enc"], enc["login_enc"],
+                enc["password_enc"],
+                entry_uuid=database.derived_uuid(survivor.vault_id, row["uuid"])
+            )
+            database.delete_entry(row["uuid"])
+        database.delete_unlock_method(other.vault_id, other.method, other.identity)
+
+    return survivor
 
 
 def unlock_with_ad(username: str, password: str) -> tuple[VaultSession | None, str]:

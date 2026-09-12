@@ -72,6 +72,16 @@ def new_uuid() -> str:
     return str(_uuid.uuid4())
 
 
+def derived_uuid(vault_id: str, source_uuid: str) -> str:
+    """
+    A stable id for an entry copied into another vault.
+
+    Two machines that absorb the same duplicate vault must land on the same
+    id, otherwise the sync would show every moved entry twice.
+    """
+    return str(_uuid.uuid5(_uuid.UUID(vault_id), source_uuid))
+
+
 def hash_identity(username: str) -> str:
     """SHA-256 of the lowercased username — one-way deterministic lookup key."""
     return hashlib.sha256(username.lower().encode()).hexdigest()
@@ -312,13 +322,19 @@ def get_entries(vault_id: str, include_deleted: bool = False) -> list[sqlite3.Ro
 
 
 def insert_entry(vault_id: str, service_enc: bytes, login_enc: bytes,
-                 password_enc: bytes) -> str:
-    entry_uuid = new_uuid()
+                 password_enc: bytes, entry_uuid: str | None = None) -> str:
+    entry_uuid = entry_uuid or new_uuid()
     with get_connection() as conn:
         conn.execute(
             """INSERT INTO entries
                    (uuid, vault_id, service, login, password, updated_at, deleted)
-               VALUES (?,?,?,?,?,?,0)""",
+               VALUES (?,?,?,?,?,?,0)
+               ON CONFLICT(uuid) DO UPDATE SET
+                   service    = excluded.service,
+                   login      = excluded.login,
+                   password   = excluded.password,
+                   updated_at = excluded.updated_at,
+                   deleted    = 0""",
             (entry_uuid, vault_id, service_enc, login_enc, password_enc, utcnow())
         )
     return entry_uuid

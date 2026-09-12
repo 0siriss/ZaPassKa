@@ -278,6 +278,73 @@ class TestUnlockMethodSync(TwoMachineTestCase):
         self.assertEqual(crypto.unlock_with_ad("jdoe", "ad-pw")[1], crypto.NO_METHOD)
 
 
+class TestDuplicateVaultsAcrossMachines(TwoMachineTestCase):
+
+    def test_both_machines_settle_on_one_merged_vault(self):
+        """
+        The scenario that made this necessary: a vault already synced from one
+        PC, and a second PC that had built its own vault from an old database
+        before Drive was ever connected.
+        """
+        self.on("B")
+        big = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+        for service in ("GitHub", "Jira", "VPN"):
+            self.add_entry(big, service, "jdoe", f"{service}-pw")
+
+        self.on("A")
+        small = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+        self.add_entry(small, "Test", "jdoe", "test-pw")
+        from_a = sync.build_snapshot(small.vault_id)
+
+        # B connects Drive and pulls what A had backed up.
+        self.on("B")
+        sync.merge_snapshot(from_a)
+        on_b, status = crypto.unlock_with_ad("jdoe", "ad-pw")
+
+        self.assertEqual(status, crypto.OK)
+        self.assertEqual(self.services(on_b),
+                         {"GitHub", "Jira", "VPN", "Test"})
+
+        # A pulls the result back and must land on the same vault.
+        merged = sync.build_snapshot(on_b.vault_id)
+        leftover = sync.build_snapshot(
+            small.vault_id if small.vault_id != on_b.vault_id else big.vault_id)
+
+        self.on("A")
+        sync.merge_snapshot(merged)
+        sync.merge_snapshot(leftover)
+        on_a, status = crypto.unlock_with_ad("jdoe", "ad-pw")
+
+        self.assertEqual(status, crypto.OK)
+        self.assertEqual(on_a.vault_id, on_b.vault_id)
+        self.assertEqual(self.services(on_a),
+                         {"GitHub", "Jira", "VPN", "Test"})
+
+    def test_a_moved_entry_keeps_one_identity_on_every_machine(self):
+        """Both machines must derive the same id, or the entry shows twice."""
+        self.on("A")
+        first  = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+        second = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), "ad-pw", "jdoe")
+        self.add_entry(second, "Test", "jdoe", "test-pw")
+        snapshots = [sync.build_snapshot(first.vault_id),
+                     sync.build_snapshot(second.vault_id)]
+
+        merged_a, _ = crypto.unlock_with_ad("jdoe", "ad-pw")
+        uuids_a = {r["uuid"] for r in database.get_entries(merged_a.vault_id)}
+
+        self.on("B")
+        for snapshot in snapshots:
+            sync.merge_snapshot(snapshot)
+        merged_b, _ = crypto.unlock_with_ad("jdoe", "ad-pw")
+        uuids_b = {r["uuid"] for r in database.get_entries(merged_b.vault_id)}
+
+        self.assertEqual(uuids_a, uuids_b)
+
+
 class TestSnapshotFormat(TwoMachineTestCase):
 
     def test_digest_ignores_the_snapshot_timestamp(self):

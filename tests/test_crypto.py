@@ -179,6 +179,91 @@ class TestUnlockMethods(VaultTestCase):
         self.assertEqual(len(database.get_entries(bob.vault_id)), 0)
 
 
+class TestDuplicateVaults(VaultTestCase):
+    """
+    Two machines can each start a vault for the same account before they ever
+    meet through the cloud. Once the snapshots meet, one secret opens two
+    vaults, and the user must not be shown only half of their passwords.
+    """
+
+    def _vault_with(self, services, secret="ad-pw"):
+        session = crypto.create_vault(
+            METHOD_AD, database.hash_identity("jdoe"), secret, "jdoe")
+        for service in services:
+            enc = crypto.encrypt_row(session.dek, service, "jdoe", f"{service}-pw")
+            database.insert_entry(session.vault_id, enc["service_enc"],
+                                  enc["login_enc"], enc["password_enc"])
+        return session
+
+    def _services(self, session):
+        return sorted(crypto.decrypt_row(session.dek, row)["service"]
+                      for row in database.get_entries(session.vault_id))
+
+    def test_unlocking_folds_duplicates_into_one_vault(self):
+        big   = self._vault_with(["GitHub", "Jira", "VPN"])
+        small = self._vault_with(["Test"])
+
+        opened, status = crypto.unlock_with_ad("jdoe", "ad-pw")
+
+        self.assertEqual(status, crypto.OK)
+        self.assertEqual(self._services(opened),
+                         ["GitHub", "Jira", "Test", "VPN"])
+        self.assertEqual(opened.vault_id, min(big.vault_id, small.vault_id))
+
+    def test_the_absorbed_vault_stops_being_a_separate_way_in(self):
+        self._vault_with(["GitHub"])
+        self._vault_with(["Test"])
+
+        opened, _ = crypto.unlock_with_ad("jdoe", "ad-pw")
+        live = [v for v in database.list_vaults()
+                if database.count_unlock_methods(v)]
+
+        self.assertEqual(live, [opened.vault_id])
+
+    def test_folding_twice_does_not_duplicate_entries(self):
+        self._vault_with(["GitHub", "Jira"])
+        self._vault_with(["Test"])
+
+        first, _  = crypto.unlock_with_ad("jdoe", "ad-pw")
+        second, _ = crypto.unlock_with_ad("jdoe", "ad-pw")
+
+        self.assertEqual(first.vault_id, second.vault_id)
+        self.assertEqual(self._services(second), ["GitHub", "Jira", "Test"])
+
+    def test_master_password_vaults_fold_the_same_way(self):
+        one = crypto.create_vault(METHOD_MASTER, "", "master pw")
+        enc = crypto.encrypt_row(one.dek, "GitHub", "jdoe", "gh-pass")
+        database.insert_entry(one.vault_id, enc["service_enc"],
+                              enc["login_enc"], enc["password_enc"])
+
+        two = crypto.create_vault(METHOD_MASTER, "", "master pw")
+        enc = crypto.encrypt_row(two.dek, "Jira", "jdoe", "jira-pass")
+        database.insert_entry(two.vault_id, enc["service_enc"],
+                              enc["login_enc"], enc["password_enc"])
+
+        opened, status = crypto.unlock_with_master("master pw")
+
+        self.assertEqual(status, crypto.OK)
+        services = sorted(crypto.decrypt_row(opened.dek, row)["service"]
+                          for row in database.get_entries(opened.vault_id))
+        self.assertEqual(services, ["GitHub", "Jira"])
+
+    def test_vaults_with_different_secrets_are_left_alone(self):
+        """Another person's vault on the same machine must not be swallowed."""
+        mine = self._vault_with(["GitHub"])
+        theirs = crypto.create_vault(
+            METHOD_AD, database.hash_identity("asmith"), "other-pw", "asmith")
+        enc = crypto.encrypt_row(theirs.dek, "Payroll", "asmith", "secret")
+        database.insert_entry(theirs.vault_id, enc["service_enc"],
+                              enc["login_enc"], enc["password_enc"])
+
+        opened, _ = crypto.unlock_with_ad("jdoe", "ad-pw")
+
+        self.assertEqual(opened.vault_id, mine.vault_id)
+        self.assertEqual(self._services(opened), ["GitHub"])
+        self.assertEqual(len(database.get_entries(theirs.vault_id)), 1)
+
+
 class TestLegacyMigration(VaultTestCase):
     """The pre-vault schema encrypted entries straight from the AD password."""
 
