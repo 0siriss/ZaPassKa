@@ -6,9 +6,13 @@ plugins {
 
 // Supplied by the build pipeline. Empty in a local build, and the app then
 // asks the user for their own OAuth client instead of failing.
-// Trimmed everywhere: a secret pasted with a trailing newline is the usual
-// reason a correct password is rejected.
+// Identifiers and paths cannot hold meaningful whitespace, so they are
+// trimmed. Passwords can, so only the line endings a paste leaves behind are
+// stripped from those.
 fun env(name: String): String = (System.getenv(name) ?: "").trim()
+
+fun secret(name: String): String =
+    (System.getenv(name) ?: "").replace("\r", "").replace("\n", "")
 
 val googleClientId: String = env("ZAPASSKA_GOOGLE_CLIENT_ID")
 
@@ -41,9 +45,9 @@ android {
         if (keystorePath.isNotEmpty()) {
             create("release") {
                 storeFile = file(keystorePath)
-                storePassword = env("ANDROID_KEYSTORE_PASSWORD")
+                storePassword = secret("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias = env("ANDROID_KEY_ALIAS")
-                keyPassword = env("ANDROID_KEY_PASSWORD")
+                keyPassword = secret("ANDROID_KEY_PASSWORD")
             }
         }
     }

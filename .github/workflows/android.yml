@@ -50,23 +50,35 @@ jobs:
       - name: Unpack the signing keystore
         if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/zapasska.jks"
+          # base64 wrapped at 76 columns is normal on macOS; drop any whitespace
+          # so the decode does not depend on how the secret was produced.
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' \
+            | base64 -d > "$RUNNER_TEMP/zapasska.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/zapasska.jks" >> "$GITHUB_ENV"
+
+          # A damaged keystore fails with the same message as a wrong password,
+          # because JKS keys its integrity check on that password. Comparing
+          # these two lines with the local file tells the cases apart.
+          echo "Decoded keystore: $(wc -c < "$RUNNER_TEMP/zapasska.jks") bytes"
+          echo "sha256: $(sha256sum "$RUNNER_TEMP/zapasska.jks" | cut -d" " -f1)"
 
       # Gradle reports a bad password only after a two-minute build, and does
       # not say which of the two is wrong. keytool answers in a second.
       - name: Check the keystore opens
         if: env.ANDROID_KEYSTORE_PATH != ''
         run: |
-          store=$(printf '%s' "$ANDROID_KEYSTORE_PASSWORD")
-          alias=$(printf '%s' "$ANDROID_KEY_ALIAS")
-          key=$(printf '%s' "$ANDROID_KEY_PASSWORD")
+          store=$(printf '%s' "$ANDROID_KEYSTORE_PASSWORD" | tr -d '\r\n')
+          alias=$(printf '%s' "$ANDROID_KEY_ALIAS" | tr -d '[:space:]')
+          key=$(printf '%s' "$ANDROID_KEY_PASSWORD" | tr -d '\r\n')
 
           if ! keytool -list -keystore "$ANDROID_KEYSTORE_PATH" \
                        -storepass "$store" >/dev/null 2>&1; then
-            echo "::error::ANDROID_KEYSTORE_PASSWORD does not open the keystore." \
-                 "Check for a trailing newline or space in the secret, and that" \
-                 "ANDROID_KEYSTORE_BASE64 is the same keystore file."
+            echo "::error::The keystore did not open. Either" \
+                 "ANDROID_KEYSTORE_PASSWORD is wrong, or the file arrived damaged:" \
+                 "a JKS checks its own integrity with that password, so both" \
+                 "fail the same way. Compare the sha256 printed above with" \
+                 "'sha256sum zapasska.jks' on your machine. Different means the" \
+                 "base64 is the problem, identical means the password is."
             exit 1
           fi
 
