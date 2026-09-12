@@ -406,10 +406,13 @@ class LoginWindow(QWidget):
         self._pending_password = ""
 
         self.setWindowTitle(tr("ZaPassKa — Login"))
-        self.setFixedSize(460, 600)
         self.setStyleSheet(theme.BASE_STYLE)
 
         self._build_ui()
+        # Let the translated text decide the size instead of hardcoded numbers.
+        hint = self.sizeHint()
+        self.setMinimumSize(max(480, hint.width()), max(520, hint.height()))
+        self.resize(self.minimumSize())
         self._load_settings()
         self._schedule_ping()
         self._startup_drive_pull()
@@ -542,8 +545,7 @@ class LoginWindow(QWidget):
         drive_row.addStretch()
 
         self.lang_btn = QPushButton(i18n.LANGUAGE_NAMES[i18n.other_language()])
-        self.lang_btn.setObjectName("modeBtn")
-        self.lang_btn.setFixedSize(40, 24)
+        self.lang_btn.setObjectName("langBtn")
         self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lang_btn.setToolTip(tr("Switch interface language"))
         self.lang_btn.clicked.connect(self._switch_language)

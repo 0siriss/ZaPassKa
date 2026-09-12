@@ -31,6 +31,9 @@ CLIPBOARD_CLEAR_MS = 30_000
 # thread aborts the process, and the entry is safe in SQLite either way.
 SYNC_SHUTDOWN_WAIT_MS = 5_000
 
+# Breathing room between the action buttons and the column edge.
+ACTION_COLUMN_GAP = 24
+
 COL_SERVICE  = 0
 COL_LOGIN    = 1
 COL_PASSWORD = 2
@@ -446,12 +449,15 @@ class VaultWindow(QWidget):
         self._clip_timer = None
 
         self.setWindowTitle(tr("ZaPassKa (password manager)"))
-        self.setMinimumSize(940, 560)
-        self.resize(1040, 640)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._on_top)
         self.setStyleSheet(theme.VAULT_STYLE)
 
         self._build_ui()
+        # Russian labels are wider than English ones; ask the layout how much
+        # room it actually needs rather than guessing a number.
+        self.setMinimumSize(max(900, self.sizeHint().width()), 560)
+        self.resize(max(1040, self.minimumWidth()), 640)
+
         self._load_rows()
         self._request_sync()
 
@@ -481,7 +487,8 @@ class VaultWindow(QWidget):
 
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(tr("🔍  Search…"))
-        self.search_edit.setFixedWidth(190)
+        self.search_edit.setMinimumWidth(150)
+        self.search_edit.setMaximumWidth(240)
         self.search_edit.textChanged.connect(self._filter)
         top.addWidget(self.search_edit)
 
@@ -521,7 +528,7 @@ class VaultWindow(QWidget):
         logout_btn.clicked.connect(self._logout)
 
         self.lang_btn = QPushButton(i18n.LANGUAGE_NAMES[i18n.other_language()])
-        self.lang_btn.setObjectName("toolBtn")
+        self.lang_btn.setObjectName("langBtn")
         self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lang_btn.setToolTip(tr("Switch interface language"))
         self.lang_btn.clicked.connect(self._switch_language)
@@ -549,8 +556,9 @@ class VaultWindow(QWidget):
         hdr = self.table.horizontalHeader()
         for column in (COL_SERVICE, COL_LOGIN, COL_PASSWORD):
             hdr.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        # ResizeToContents measures the item, not the widget in the cell, so
+        # the action column is sized from the buttons in _fit_action_column.
         hdr.setSectionResizeMode(COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(COL_ACTIONS, 290)
         self.table.verticalHeader().setDefaultSectionSize(52)
         root.addWidget(self.table)
 
@@ -589,6 +597,7 @@ class VaultWindow(QWidget):
             index = self.table.rowCount()
             self.table.insertRow(index)
             self._fill_row(index, row_data)
+        self._fit_action_column()
         self._update_status()
 
     def _fill_row(self, index: int, row_data: dict):
@@ -639,10 +648,39 @@ class VaultWindow(QWidget):
 
         delete_btn = button("🗑", tr("Delete entry"),
                             lambda _, d=row_data: self._delete_entry(d), "dangerBtn")
-        delete_btn.setFixedSize(32, 30)
         actions.addWidget(delete_btn)
 
         self.table.setCellWidget(index, COL_ACTIONS, cell)
+
+    def _fit_action_column(self):
+        """
+        Widen the action column until the translated buttons fit.
+
+        The width is summed from the buttons themselves: a layout's own hint
+        reads short until Qt has polished the stylesheet onto every child, and
+        that happens after the window is first shown.
+        """
+        widest = 0
+        for row in range(self.table.rowCount()):
+            cell = self.table.cellWidget(row, COL_ACTIONS)
+            if cell is None:
+                continue
+            cell.ensurePolished()
+            buttons = cell.findChildren(QPushButton)
+            if not buttons:
+                continue
+            layout = cell.layout()
+            margins = layout.contentsMargins()
+            for button in buttons:
+                button.ensurePolished()
+            needed = (sum(b.sizeHint().width() for b in buttons)
+                      + layout.spacing() * (len(buttons) - 1)
+                      + margins.left() + margins.right()
+                      + ACTION_COLUMN_GAP)
+            widest = max(widest, needed)
+
+        if widest:
+            self.table.setColumnWidth(COL_ACTIONS, widest)
 
     def _update_status(self):
         shown, total = self.table.rowCount(), len(self._rows)
@@ -795,6 +833,11 @@ class VaultWindow(QWidget):
     def _update_pin_button(self):
         self.pin_btn.setChecked(self._on_top)
         self.pin_btn.setText(tr("📌 On Top") if self._on_top else tr("📌 Off"))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Once the event loop has run, the stylesheet is on and hints are final.
+        QTimer.singleShot(0, self._fit_action_column)
 
     def _switch_language(self):
         """Rebuild the window: every label was translated when it was created."""

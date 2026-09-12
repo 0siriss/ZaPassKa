@@ -360,6 +360,57 @@ class TestLanguage(UiTestCase):
                 f"placeholders differ for {source!r}")
 
 
+class TestLayoutFits(UiTestCase):
+    """
+    Russian labels are longer than English ones. A window sized for English
+    clips them, so both windows must ask their layout how wide to be.
+    """
+
+    def _clipped(self, window):
+        from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
+
+        window.show()
+        for _ in range(3):
+            QApplication.processEvents()
+        return [
+            (w.text(), w.width(), w.sizeHint().width())
+            for w in window.findChildren((QPushButton, QLabel))
+            if w.isVisible() and w.text().strip()
+            and w.width() < w.sizeHint().width()
+        ]
+
+    def setUp(self):
+        super().setUp()
+        import i18n
+        self._saved = i18n.current()
+
+    def tearDown(self):
+        import i18n
+        i18n.set_language(self._saved)
+        super().tearDown()
+
+    def _vault(self):
+        from vault_window import VaultWindow
+
+        session = crypto.create_vault(METHOD_MASTER, "", "master password", "master")
+        for service in ("GitHub", "Jira"):
+            enc = crypto.encrypt_row(session.dek, service, "jdoe", "pw")
+            database.insert_entry(session.vault_id, enc["service_enc"],
+                                  enc["login_enc"], enc["password_enc"])
+        return self.track(VaultWindow(session))
+
+    def test_no_label_or_button_is_clipped(self):
+        import i18n
+        from login_window import LoginWindow
+
+        for language in i18n.LANGUAGES:
+            i18n.set_language(language)
+            with self.subTest(language=language, window="vault"):
+                self.assertEqual(self._clipped(self._vault()), [])
+            with self.subTest(language=language, window="login"):
+                self.assertEqual(self._clipped(self.track(LoginWindow())), [])
+
+
 class TestAppIcon(UiTestCase):
     """An ELF binary carries no icon, so Qt has to be told about it."""
 

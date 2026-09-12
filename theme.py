@@ -72,6 +72,8 @@ QWidget {{
     background: {DARK_BG};
     font-family: 'Segoe UI', sans-serif;
 }}
+/* Captions must show the surface they sit on, not the window background. */
+QLabel {{ background: transparent; }}
 QFrame#panel {{
     background: {PANEL_BG};
     border: 1px solid {BORDER};
@@ -123,6 +125,16 @@ QPushButton#modeBtn:checked {{
     color: {ACCENT};
     border-color: {ACCENT};
 }}
+QPushButton#langBtn {{
+    background: transparent;
+    color: {TEXT_DIM};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}}
+QPushButton#langBtn:hover {{ color: {ACCENT}; border-color: {ACCENT}; }}
 QPushButton#linkBtn {{
     background: transparent;
     color: {TEXT_DIM};
@@ -156,6 +168,7 @@ QDialog {{
     color: {TEXT};
     font-family: 'Segoe UI', sans-serif;
 }}
+QLabel {{ background: transparent; }}
 QLabel {{ color: {TEXT_DIM}; font-size: 11px; font-weight: 600; }}
 QLabel#info {{
     color: {TEXT};
@@ -198,6 +211,7 @@ QWidget {{
     color: {TEXT};
     font-family: 'Segoe UI', sans-serif;
 }}
+QLabel {{ background: transparent; }}
 QLabel#header {{ font-size: 20px; font-weight: 700; color: {TEXT}; }}
 QLabel#userInfo {{ font-size: 12px; color: {TEXT_DIM}; }}
 QTableWidget {{
@@ -276,6 +290,16 @@ QPushButton#logoutBtn, QPushButton#toolBtn {{
 }}
 QPushButton#logoutBtn:hover {{ color: {DANGER}; border-color: {DANGER}; }}
 QPushButton#toolBtn:hover {{ color: {ACCENT}; border-color: {ACCENT}; }}
+QPushButton#langBtn {{
+    background: transparent;
+    color: {TEXT_DIM};
+    border: 1px solid {BORDER};
+    border-radius: 7px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QPushButton#langBtn:hover {{ color: {ACCENT}; border-color: {ACCENT}; }}
 QPushButton#pinBtn {{
     background: transparent;
     color: {TEXT_DIM};

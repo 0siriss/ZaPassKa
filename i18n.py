@@ -146,13 +146,13 @@ _RU = {
 
     # ── Vault window ──────────────────────────────────────────────
     "ZaPassKa (password manager)": "ZaPassKa (менеджер паролей)",
-    "Unlocked with  {name}": "Вход выполнен: {name}",
+    "Unlocked with  {name}": "Вход: {name}",
     "master password": "мастер-пароль",
     "🔍  Search…": "🔍  Поиск…",
     "＋  Add Entry": "＋  Добавить",
-    "☁ Sync": "☁ Синхронизация",
-    "🛡 Security": "🛡 Безопасность",
-    "📌 On Top": "📌 Поверх окон",
+    "☁ Sync": "☁ Синхрон.",
+    "🛡 Security": "🛡 Защита",
+    "📌 On Top": "📌 Поверх",
     "📌 Off": "📌 Обычно",
     "Sign out": "Выйти",
     "Service": "Сервис",
