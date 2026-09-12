@@ -1,12 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""
+PyInstaller spec — one self-contained executable per platform.
 
+Windows gets the .ico and a windowed (console-less) binary; on Linux the icon
+option does not apply and is left out.
+"""
+import sys
+
+is_windows = sys.platform == "win32"
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=[
+        # Imported inside functions, so keep them explicit for the analyzer.
+        'vault_window',
+        'cloud_sync',
+        'gdrive',
+        'sync',
+        'build_config',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -22,7 +37,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='main',
+    name='ZaPassKa',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -35,5 +50,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.ico'],
+    icon=['icon.ico'] if is_windows else None,
 )
