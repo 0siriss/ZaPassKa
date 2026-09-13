@@ -110,5 +110,24 @@ object Strings {
         "Delete entry “%s”? This cannot be undone." to
             "Удалить запись «%s»? Это необратимо.",
         "Switch language" to "Сменить язык",
+
+        // Biometrics and locking
+        "Unlock with fingerprint" to "Вход по отпечатку",
+        "Open the vault" to "Открыть хранилище",
+        "Touch the sensor to open ZaPassKa" to
+            "Приложите палец, чтобы открыть ZaPassKa",
+        "Use the master password" to "Ввести мастер-пароль",
+        "Turn on fingerprint unlock" to "Включить вход по отпечатку",
+        "Confirm to turn on fingerprint unlock" to
+            "Подтвердите, чтобы включить вход по отпечатку",
+        "Fingerprint unlock is on" to "Вход по отпечатку включён",
+        "Fingerprint unlock is off" to "Вход по отпечатку выключен",
+        "Fingerprint" to "Отпечаток",
+        "This device has no fingerprint set up." to
+            "На этом устройстве не настроен отпечаток.",
+        "Fingerprint unlock was reset because the fingerprints on this device "
+            + "changed. Enter the master password." to
+            "Вход по отпечатку сброшен, потому что отпечатки на устройстве "
+            + "изменились. Введите мастер-пароль.",
     )
 }

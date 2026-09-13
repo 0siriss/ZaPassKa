@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
@@ -65,6 +66,9 @@ fun VaultScreen(
     onSync: () -> Unit,
     onLock: () -> Unit,
     onSwitchLanguage: () -> Unit,
+    biometricAvailable: Boolean,
+    biometricEnabled: Boolean,
+    onToggleBiometric: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize().background(Palette.Background)) {
         Column(Modifier.fillMaxSize()) {
@@ -80,6 +84,16 @@ fun VaultScreen(
                     Text(tr("Vault"), fontSize = 20.sp,
                          fontWeight = FontWeight.Bold, color = Palette.Text)
                     Text(tr("%d entries", total), fontSize = 12.sp, color = Palette.TextDim)
+                }
+                if (biometricAvailable) {
+                    IconButton(onClick = onToggleBiometric) {
+                        Icon(
+                            Icons.Default.Fingerprint,
+                            contentDescription = tr("Fingerprint"),
+                            tint = if (biometricEnabled) Palette.Accent
+                                   else Palette.TextDim,
+                        )
+                    }
                 }
                 IconButton(onClick = onSync, enabled = !syncing) {
                     Icon(Icons.Default.Cloud, contentDescription = tr("Sync"),

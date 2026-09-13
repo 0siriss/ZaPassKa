@@ -27,7 +27,10 @@ android {
 
     defaultConfig {
         applicationId = "com.zapasska"
-        minSdk = 26
+        // Android 9 and up: below that the fingerprint prompt falls back to a
+        // compatibility dialog with its own theming requirements, and the
+        // platform prompt is the one worth supporting.
+        minSdk = 28
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
@@ -97,6 +100,10 @@ dependencies {
 
     // scrypt: the platform has no implementation of it.
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+
+    // The fingerprint prompt; it needs a FragmentActivity to host its dialog.
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
 
     // Android stubs org.json for unit tests, so give them a real one.
     testImplementation("org.json:json:20240303")

@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -64,6 +65,8 @@ fun LoginScreen(
     onToggleCreate: () -> Unit,
     onConnectDrive: () -> Unit,
     onSwitchLanguage: () -> Unit,
+    biometricOffered: Boolean,
+    onBiometricUnlock: () -> Unit,
 ) {
     var revealed by remember { mutableStateOf(false) }
     val submit = if (creating) onCreate else onUnlock
@@ -164,6 +167,20 @@ fun LoginScreen(
                     } else {
                         Text(tr(if (creating) "Create vault" else "Unlock"),
                              fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                if (biometricOffered) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onBiometricUnlock,
+                        enabled = busy == null,
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                    ) {
+                        Icon(Icons.Default.Fingerprint, contentDescription = null,
+                             tint = Palette.Accent, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(tr("Unlock with fingerprint"))
                     }
                 }
 

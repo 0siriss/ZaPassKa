@@ -6,12 +6,16 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import com.zapasska.core.BiometricLock
 import com.zapasska.core.Crypto
 import com.zapasska.core.UnlockResult
 import com.zapasska.core.Vault
@@ -33,7 +37,7 @@ import kotlinx.coroutines.withContext
 
 private const val MIN_MASTER_LENGTH = 8
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private lateinit var db: Database
     private lateinit var vault: Vault
@@ -60,11 +64,24 @@ class MainActivity : ComponentActivity() {
     private var formPassword by mutableStateOf("")
     private var deleting by mutableStateOf<Entry?>(null)
 
+    private var biometricEnabled by mutableStateOf(false)
+    private var biometricAvailable by mutableStateOf(false)
+
+    /** Set while the browser has the foreground, so the OAuth trip does not lock. */
+    private var awaitingBrowser = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Blanks the window in the recent-apps switcher and blocks screenshots,
+        // so the list of passwords cannot be captured from outside the app.
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                        WindowManager.LayoutParams.FLAG_SECURE)
+
         db = Database(applicationContext)
         vault = Vault(db)
         Strings.load(applicationContext)
+        biometricAvailable = BiometricLock.available(this)
+        biometricEnabled = BiometricLock.isEnabled(this)
         hasVault = vault.hasMasterVault()
         creating = !hasVault
         syncStatus = driveStatus()
@@ -88,6 +105,8 @@ class MainActivity : ComponentActivity() {
                         onToggleCreate = { creating = !creating; message = null },
                         onConnectDrive = ::connectDrive,
                         onSwitchLanguage = ::switchLanguage,
+                        biometricOffered = biometricAvailable && biometricEnabled,
+                        onBiometricUnlock = ::unlockWithBiometrics,
                     )
                 } else {
                     VaultScreen(
@@ -108,6 +127,9 @@ class MainActivity : ComponentActivity() {
                         onSync = ::syncNow,
                         onLock = ::lock,
                         onSwitchLanguage = ::switchLanguage,
+                        biometricAvailable = biometricAvailable,
+                        biometricEnabled = biometricEnabled,
+                        onToggleBiometric = ::toggleBiometrics,
                     )
 
                     if (showEditor) {
@@ -141,6 +163,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Leaving the app locks the vault. The data key only ever lives in memory,
+     * so this drops it: coming back asks for the password or the fingerprint
+     * again. The one exception is the trip to the browser for Google's consent
+     * screen, which would otherwise lock the vault mid-authorization.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (awaitingBrowser) {
+            awaitingBrowser = false
+            return
+        }
+        if (session != null) lock()
     }
 
     /** The browser sends the authorization code back to this activity. */
@@ -294,6 +331,95 @@ class MainActivity : ComponentActivity() {
 
     // ── Google Drive ──────────────────────────────────────────────
 
+    /**
+     * Opens the vault with a fingerprint. The stored key belongs to one vault;
+     * if that vault has since been absorbed by a merge, or its unlock method
+     * retired, the registration is dropped and the password takes over.
+     */
+    private fun unlockWithBiometrics() {
+        val cipher = BiometricLock.cipherForUnlocking(this)
+        if (cipher == null) {
+            biometricEnabled = false
+            message = Strings.tr("Fingerprint unlock was reset because the "
+                                 + "fingerprints on this device changed. "
+                                 + "Enter the master password.")
+            return
+        }
+
+        prompt(
+            title = Strings.tr("Open the vault"),
+            subtitle = Strings.tr("Touch the sensor to open ZaPassKa"),
+            cipher = cipher,
+        ) { authenticated ->
+            val opened = BiometricLock.open(this, authenticated)
+            if (opened == null || !vaultStillUsable(opened.vaultId)) {
+                BiometricLock.disable(this)
+                biometricEnabled = false
+                message = Strings.tr("Enter your master password.")
+            } else {
+                open(opened)
+            }
+        }
+    }
+
+    private fun vaultStillUsable(vaultId: String): Boolean =
+        db.methodsOf(vaultId).isNotEmpty()
+
+    private fun toggleBiometrics() {
+        val current = session ?: return
+        if (biometricEnabled) {
+            BiometricLock.disable(this)
+            biometricEnabled = false
+            syncStatus = Strings.tr("Fingerprint unlock is off")
+            return
+        }
+        if (!BiometricLock.available(this)) {
+            syncStatus = Strings.tr("This device has no fingerprint set up.")
+            return
+        }
+
+        prompt(
+            title = Strings.tr("Turn on fingerprint unlock"),
+            subtitle = Strings.tr("Confirm to turn on fingerprint unlock"),
+            cipher = BiometricLock.cipherForEnrolling(),
+        ) { authenticated ->
+            BiometricLock.store(this, current, authenticated)
+            biometricEnabled = true
+            syncStatus = Strings.tr("Fingerprint unlock is on")
+        }
+    }
+
+    private fun prompt(
+        title: String,
+        subtitle: String,
+        cipher: javax.crypto.Cipher,
+        onSuccess: (javax.crypto.Cipher) -> Unit,
+    ) {
+        val callback = object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(
+                result: BiometricPrompt.AuthenticationResult) {
+                result.cryptoObject?.cipher?.let(onSuccess)
+            }
+
+            override fun onAuthenticationError(code: Int, description: CharSequence) {
+                if (code != BiometricPrompt.ERROR_USER_CANCELED &&
+                    code != BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
+                    message = description.toString()
+                }
+            }
+        }
+
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(title)
+            .setSubtitle(subtitle)
+            .setNegativeButtonText(Strings.tr("Use the master password"))
+            .setConfirmationRequired(false)
+            .build()
+
+        BiometricPrompt(this, ContextCompat.getMainExecutor(this), callback)
+            .authenticate(info, BiometricPrompt.CryptoObject(cipher))
+    }
+
     private fun switchLanguage() = Strings.toggle(applicationContext)
 
     private fun driveStatus(): String = Strings.tr(
@@ -323,9 +449,10 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
+        awaitingBrowser = true
         runCatching { startActivity(Intent(Intent.ACTION_VIEW,
                                            GoogleAuth.authorizationUrl(this))) }
-            .onFailure { message = it.message }
+            .onFailure { awaitingBrowser = false; message = it.message }
     }
 
     private fun syncNow() {
